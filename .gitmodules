@@ -1,0 +1,3 @@
+[submodule "pytorch-constrained-opt"]
+	path = pytorch-constrained-opt
+	url = https://github.com/eelcovdw/pytorch-constrained-opt.git
