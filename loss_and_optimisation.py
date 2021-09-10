@@ -2,21 +2,18 @@ import pytorch_lightning as pl
 from lagrangian_opt.constraint import Constraint, ConstraintOptimizer
 from torch.distributions import kl_divergence
 import torch
-
+import torch.nn as nn
 
 # TODO: total correlation, dimensionwise KL
 # TODO: Free bits KL for Non-Gaussian case
 
 
-class Objective(pl.LightningModule):
-    def __init__(self, vae, args):
-        super().__init__()
+class Objective(nn.Module):
+    def __init__(self, args):
+        super(Objective, self).__init__()
 
         # VAE, FB, MDR,
         self.objective = args.objective
-        self.vae = vae
-        self.prior = self.vae.prior
-
         self.objective = self.args.objective
         self.args = args
 
@@ -25,7 +22,10 @@ class Objective(pl.LightningModule):
             self.mdr_constraint = Constraint(args.mdr_value, ">", alpha=0.5)
             self.mdr_optimiser = ConstraintOptimizer(torch.optim.RMSprop, self.mdr_constraint.parameters(), 0.00005)
 
-    def compute_loss(self, labels, q_z_x, z_post, p_x_z):
+    def compute_loss(self, x_in, q_z_x, z_post, p_x_z):
+        # TODO: should be something along the lines of x[:, 1:] (cutting of the start token)
+        # labels = torch.tensor(np.random.randint(0, self.V, size=(self.B, self.L)))
+
         # TODO: implement other types of losses
         # Expected KL from prior to posterior
         kl_prior_post = self.kl_prior_post(q_z_x)

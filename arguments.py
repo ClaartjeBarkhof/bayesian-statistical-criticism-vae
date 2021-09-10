@@ -55,18 +55,65 @@ def preprare_parser(print_settings=True):
                         help="Whether or not to use a lr scheduler (default: True).")
 
     # ----------------------------------------------------------------------------------------------------------------
+    # ARCHITECTURE
+    parser.add_argument("--latent_dim", default=16, type=int, help="Dimensionality of the latent space.")
+    # dcgan, convolutional, mlp
+    parser.add_argument("--encoder_network_type", default="dcgan", type=str,
+                        help="Which architecture to use for encoder, options:"
+                             "  - dcgan"
+                             "  - mlp"
+                             "  - convolutional")
+    # dcgan, pixelcnn, deconvolutional, mlp
+    parser.add_argument("--decoder_network_type", default="dcgan", type=str,
+                        help="Which architecture to use for encoder, options:"
+                             "  - dcgan"
+                             "  - mlp"
+                             "  - deconvolutional"
+                             "  - pixelcnn")
+    # ----------------------------------------------------------------------------------------------------------------
+    # DISTRIBUTION TYPES
+    # independent_gaussian, ...
+    parser.add_argument("--q_z_x_type", default="independent_gaussian", type=str,
+                        help="Which type of posterior distribution to use, options:"
+                             "  - independent_gaussian"
+                             "  - ...")
+    # isotropic_gaussian, ...
+    parser.add_argument("--p_z_type", default="isotropic_gaussian", type=str,
+                        help="Which type of prior distribution to use, options:"
+                             "  - isotropic_gaussian"
+                             "  - ...")
+    # p_x_z_type: [bernoulli, gaussian, categorical]
+    parser.add_argument("--p_x_z_type", default="bernoulli", type=str,
+                        help="Which type of predictive p_x_z distribution to use, options:"
+                             "  - bernoulli"
+                             "  - gaussian"
+                             "  - categorical")
+
+    # ----------------------------------------------------------------------------------------------------------------
+    # GENERAL DATASET ARGUMENTS
+    parser.add_argument("--data_dir", default='data', type=str, help="The name of the data directory.")
+    parser.add_argument("--image_or_language", default='image', type=str,
+                        help="The type of the dataset, options: 'image' or 'language'.")
+
+    # ----------------------------------------------------------------------------------------------------------------
+    # IMAGE DATASET ARGUMENTS
+    parser.add_argument("--image_dataset_name", default='mnist', type=str, help="The name of the image dataset.")
+    parser.add_argument("--image_w", default=28, type=int, help="The width of the images in the data set.")
+    parser.add_argument("--image_h", default=28, type=int, help="The height of the images in the data set.")
+
+
+    # ----------------------------------------------------------------------------------------------------------------
     # LANGUAGE DATASET ARGUMENTS
     parser.add_argument("--tokenizer_name", default='roberta', type=str,
                         help="The name of the tokenizer, 'roberta' by default.")
     parser.add_argument("--language_dataset_name", default='ptb_text_only', type=str,
                         help="The name of the dataset, 'cnn_dailymail' by default, else: ptb_text_only.")
+    parser.add_argument("--vocab_size", default=50265, type=int,
+                        help="Size of the vocabulary size of the tokenizer used.") # 50265 = roberta vocab size
     parser.add_argument("--num_workers", default=6, type=int,
                         help="Num workers for data loading.")
     parser.add_argument("--max_seq_len", default=64, type=int,
                         help="What the maximum sequence length the model accepts is (default: 128).")
-
-    # ----------------------------------------------------------------------------------------------------------------
-    # TODO: VISION DATASET ARGUMENTS
 
     # ----------------------------------------------------------------------------------------------------------------
     # PRINTING & LOGGING
