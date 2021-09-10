@@ -1,26 +1,20 @@
-import pytorch_lightning as pl
-import numpy as np
 import torch
 import torch.nn as nn
-# from torch.distributions import Categorical, Mul
 import torch.distributions as td
-from architectures import DCGanDecoder
+from .architectures import DCGanDecoder
 
-"""
-Config arguments:
-- p_z_type: [isotropic_gaussian]
-- p_x_z_type: [bernoulli, gaussian, categorical]
-- decoder_network_type: [dcgan, pixelcnn, deconvolutional, ...]
-- 
-"""
 
 class GenerativeModel(nn.Module):
     def __init__(self, args):
         super(GenerativeModel, self).__init__()
 
         self.D = args.latent_dim
+
+        # LANGUAGE
         self.L = args.max_seq_len
         self.V = args.vocab_size
+
+        # IMAGE
         self.B = args.batch_size
         self.W = args.image_w
         self.H = args.image_h
@@ -32,54 +26,77 @@ class GenerativeModel(nn.Module):
 
         # PRIOR
         self.p_z_type = args.p_z_type
-        self.p_z_dist = self.get_p_z_dist()
 
         # OUTPUT DISTRIBUTION
         self.p_x_z_type = args.p_x_z_type
 
-    def sample(self, S=1):
-        z_prior = self.p_z(S=S)
+    def sample_generative_model(self, S=1):
+        z_prior = self.sample_prior(S=S)
         p_x_z_prior = self.p_x_z(z_prior)
         return p_x_z_prior
 
-    def forward(self, x_in, z_post):
-        p_x_z_post = self.p_x_z(z_post)
-        ll = p_x_z_post.log_prob(x_in)
-        return p_x_z_post, ll
+    def forward(self, z_post, x_in=None):
+        """
+        Map a sample from the posterior to a generative output distribution: z_post -> p(X|Z=z_post)
+        -> Potentially condition on (a part of) x too, e.g. the prefix: z_post -> p(X|Z=z_post, Y=x<i)
 
-    def p_z(self, S=1):
-        return self.prior.sample(sample_shape=(S,))
+        Input:
+            z_post: [B, D]
+                samples from the posterior q(z|x)
+            x_in: [B, L] (language) or [B, C, W, H] (image)
+                the original input the posterior conditioned on
+
+        Output:
+            p_x_z_post: [B, L] (language) or or [B, C, W, H] (image), generative output distribution p(X|Z=z_post)
+        """
+        p_x_z_post = self.p_x_z(z_post)
+        return p_x_z_post
+
+    def sample_prior(self, S=1):
+        """
+        Returns a from the prior defined by <p_z_type>.
+
+        Input:
+            S: int:
+                the number of samples it should return.
+
+        Output:
+            z_prior: [S, D]
+                samples from the prior of dimensionality of the latent space.
+        """
+        z_prior = self.p_z.sample(sample_shape=(S,))
+
+        return z_prior
 
     def p_x_z(self, z, x=None):
-        p_x_z_params = self.decoder_network(z, x)
+        p_x_z_params = self.decoder_network(z)  # TODO: some decoder networks take x as additional input
 
         p_x_z = None
         if self.p_x_z_type == "bernoulli":
+            # TODO: apply sigmoid?, as the output of DCGAN is tanh
             p_x_z = td.Independent(td.Bernoulli(logits=p_x_z_params), 1)
 
-        # TODO: implement Gaussian output
         elif self.p_x_z_type == "gaussian":
-            p_x_z = None
+            p_x_z = td.Independent(td.Normal(loc=p_x_z_params, scale=torch.ones_like(p_x_z_params)), 1)
 
-        # TODO: implement Categorical output
         elif self.p_x_z_type == "categorical":
+            # TODO: implement Categorical output
             # p_x_z_params: [B, L, V]
             p_x_z = td.Categorical(logits=p_x_z_params)
+
         else:
+            # TODO: implement other options
             raise NotImplementedError
 
         return p_x_z
 
-    def get_p_z_dist(self):
-        p_z_dist = None
-
+    def p_z(self):
         if self.p_z_type == "isotropic_gaussian":
-            p_z_dist = td.MultivariateNormal(torch.zeros(self.D), torch.eye(self.D))
+            return td.Independent(td.Normal(loc=torch.zeros(self.D), scale=torch.ones(self.D)), 1)
         # TODO: add other priors
         else:
             raise NotImplementedError
 
-        return p_z_dist
 
     def get_decoder_network(self):
         decoder_network = None

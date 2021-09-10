@@ -1,7 +1,7 @@
 import torch.nn as nn
 import torch.distributions as td
-from vae_model.architectures import DCGanEncoder, DCGanDecoder
-
+from .architectures import DCGanEncoder, DCGanDecoder
+import torch
 """
 config params:
 - encoder_network_type: []
@@ -35,7 +35,7 @@ class InferenceModel(nn.Module):
         if self.encoder_network_type == "convolutional":
             raise NotImplementedError
 
-        elif self.decoder_network_type == "dcgan":
+        elif self.encoder_network_type == "dcgan":
             encoder_network = DCGanEncoder(z_dim=self.D)
 
         return encoder_network
@@ -44,9 +44,9 @@ class InferenceModel(nn.Module):
         q_z_x = None
         q_z_x_params = self.encoder_network(x_in)
 
-        if self.q_x_z_type == "independent_gaussian":
+        if self.q_z_x_type == "independent_gaussian":
             # TODO: check whether positivitvy of scale is ensured
-            loc, scale = q_z_x_params[:, :self.D, :, self.D:]
+            loc, scale = q_z_x_params[:, :self.D], nn.functional.softplus(q_z_x_params[:, self.D:])
             # [B, D] (D independent Gaussians)
             q_z_x = td.Independent(td.Normal(loc=loc, scale=scale), 1)
         else:
@@ -58,4 +58,5 @@ class InferenceModel(nn.Module):
         # [S, B, D]
         q_z_x = self.encode(x_in)
         z_post = q_z_x.rsample(sample_shape=(n_samples,))
+
         return q_z_x, z_post

@@ -1,40 +1,46 @@
-import pytorch_lightning as pl
 from lagrangian_opt.constraint import Constraint, ConstraintOptimizer
 from torch.distributions import kl_divergence
+from torch.optim import RMSprop
 import torch
 import torch.nn as nn
+import numpy as np
 
 # TODO: total correlation, dimensionwise KL
 # TODO: Free bits KL for Non-Gaussian case
-
 
 class Objective(nn.Module):
     def __init__(self, args):
         super(Objective, self).__init__()
 
-        # VAE, FB, MDR,
         self.objective = args.objective
-        self.objective = self.args.objective
+        self.image_or_language = args.image_or_language
         self.args = args
 
         # Rate constraint
         if self.objective == "MDR-VAE":
             self.mdr_constraint = Constraint(args.mdr_value, ">", alpha=0.5)
-            self.mdr_optimiser = ConstraintOptimizer(torch.optim.RMSprop, self.mdr_constraint.parameters(), 0.00005)
+            self.mdr_optimiser = ConstraintOptimizer(RMSprop(), self.mdr_constraint.parameters(), 0.00005)
 
-    def compute_loss(self, x_in, q_z_x, z_post, p_x_z):
+    def compute_loss(self, x_in, q_z_x, z_post, p_z, p_x_z):
         # TODO: should be something along the lines of x[:, 1:] (cutting of the start token)
-        # labels = torch.tensor(np.random.randint(0, self.V, size=(self.B, self.L)))
+        if self.image_or_language == "language":
+            labels = torch.tensor(np.random.randint(0, self.V, size=(self.B, self.L)))
+        else:
+            labels = x_in
 
         # TODO: implement other types of losses
         # Expected KL from prior to posterior
-        kl_prior_post = self.kl_prior_post(q_z_x)
+        kl_prior_post = self.kl_prior_post(p_z=p_z, q_z_x=q_z_x, z_post=z_post, analytical=False)
 
         # Expected negative log likelihood under q
-        nll = - p_x_z.log_prob(labels).sum(-1).mean(0).item()
+        # TODO: there might be some kind of masking necessary
+
+        # Reduce all dimensions with sum, except for the batch dimension, average that
+        nll = - p_x_z.log_prob(labels).reshape(self.args.batch_size, -1).mean()
 
         # Maximum mean discrepancy
-        mmd = self.maximum_mean_discrepancy(z_post)
+        # z_post at this point is [1, B, D]
+        mmd = self.maximum_mean_discrepancy(z_post.squeeze(0))
 
         total_loss = None
         if self.objective == "AE":
@@ -52,9 +58,16 @@ class Objective(nn.Module):
             total_loss = - nll + (1 - self.args.info_alpha) * kl_prior_post \
                          + (self.args.info_alpha + self.args.info_lambda - 1) * mmd
 
-        return total_loss
+        loss_dict = dict(
+            total_loss=total_loss,
+            mmd=mmd.item(),
+            nll=nll.item(),
+            kl_prior_post=kl_prior_post.item()
+        )
 
-    def kl_prior_post(self, q_z_x, z_post=None, analytical=True):
+        return loss_dict
+
+    def kl_prior_post(self, p_z, q_z_x, z_post=None, analytical=False):
         """
         Computes the KL from prior to posterior, either analytically or empirically,
         depending on whether the posterior distribution is given.
@@ -64,14 +77,16 @@ class Objective(nn.Module):
         """
 
         if analytical:
+            # TODO: this is not possible for all
             # [B] (summed over latent dimension)
-            kl = kl_divergence(q_z_x, self.prior)
+            kl = kl_divergence(q_z_x, p_z)
 
         else:
+            # [1, B]
             log_q_z_x = q_z_x.log_prob(z_post)
-            log_p_z = self.prior.log_prob(z_post)
-            kl = log_q_z_x - log_p_z
+            log_p_z = p_z.log_prob(z_post)
 
+            kl = (log_q_z_x - log_p_z).mean()
         return kl
 
     @staticmethod
@@ -124,8 +139,9 @@ class Objective(nn.Module):
         y = y.unsqueeze(0)
         tiled_x = x.expand(x_size, y_size, dim)
         tiled_y = y.expand(x_size, y_size, dim)
-        kernel_input = (tiled_x - tiled_y).pow(2).mean(2) / float(dim)
-        return torch.exp(-torch.tensor(kernel_input))
+        kernel_input = (tiled_x - tiled_y).pow(2).mean(2) / torch.Tensor([float(dim)])
+
+        return torch.exp(-kernel_input)
 
     def maximum_mean_discrepancy(self, z_post):
         """

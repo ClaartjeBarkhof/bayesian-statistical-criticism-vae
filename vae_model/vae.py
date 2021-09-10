@@ -1,7 +1,8 @@
 import pytorch_lightning as pl
-from generative_model import GenerativeModel
-from inference_model import InferenceModel
+from .generative_model import GenerativeModel
+from .inference_model import InferenceModel
 from loss_and_optimisation import Objective
+import torch
 
 
 class VaeModel(pl.LightningModule):
@@ -14,6 +15,8 @@ class VaeModel(pl.LightningModule):
         self.B = args.batch_size
         self.W = args.image_w
         self.H = args.image_h
+
+        self.args = args
 
         # Inference + generative model (encoder + decoder)
         self.inf_model = InferenceModel(args=args)
@@ -32,11 +35,23 @@ class VaeModel(pl.LightningModule):
         # Image: Bernoulli or Gaussian of [W, H]
         p_x_z = self.gen_model(x_in=x_in, z_post=z_post)
 
-        return q_z_x, z_post, p_x_z
+        # Get the prior of the generative model
+        p_z = self.gen_model.p_z()
 
-    def training_step(self, x_in):
-        q_z_x, z_post, p_x_z = self.forward(x_in)
+        return q_z_x, z_post, p_z, p_x_z
 
-        loss = self.objective.compute_loss(x_in, q_z_x, z_post, p_x_z)
+    def training_step(self, x_in_labels_in, batch_idx):
+        x_in, labels_in = x_in_labels_in[0], x_in_labels_in[1]
 
-        return loss
+        q_z_x, z_post, p_z, p_x_z = self.forward(x_in)
+
+        loss_dict = self.objective.compute_loss(x_in, q_z_x, z_post, p_z, p_x_z)
+
+        self.log("train_stats", loss_dict)
+
+        return loss_dict["total_loss"]
+
+    def configure_optimizers(self):
+        optimiser = torch.optim.AdamW(self.parameters(), lr=self.args.lr)
+        return optimiser
+

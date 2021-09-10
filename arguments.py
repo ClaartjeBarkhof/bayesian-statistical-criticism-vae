@@ -1,8 +1,8 @@
 import distutils
 import configargparse
+import sys
 
-
-def preprare_parser(print_settings=True):
+def preprare_parser(jupyter=False, print_settings=True):
     parser = configargparse.ArgParser()
     parser.add_argument('--config_file', required=False, is_config_file=True, help='config file path')
 
@@ -10,7 +10,7 @@ def preprare_parser(print_settings=True):
 
     # ----------------------------------------------------------------------------------------------------------------
     # OBJECTIVE
-    parser.add_argument("--objective", default="VAE", type=str, required=True,
+    parser.add_argument("--objective", default="VAE", type=str,
                         help="Which objective to use, options:"
                              "  - VAE"
                              "  - AE"
@@ -83,7 +83,7 @@ def preprare_parser(print_settings=True):
                              "  - isotropic_gaussian"
                              "  - ...")
     # p_x_z_type: [bernoulli, gaussian, categorical]
-    parser.add_argument("--p_x_z_type", default="bernoulli", type=str,
+    parser.add_argument("--p_x_z_type", default="gaussian", type=str,
                         help="Which type of predictive p_x_z distribution to use, options:"
                              "  - bernoulli"
                              "  - gaussian"
@@ -145,6 +145,9 @@ def preprare_parser(print_settings=True):
 
     # ----------------------------------------------------------------------------------------------------------------
     # PARSE & PRINT & RETURN
+
+    if jupyter:
+        sys.argv = [sys.argv[0]]
 
     args = parser.parse_args()
 

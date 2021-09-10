@@ -1,4 +1,5 @@
 import torch.nn as nn
+import torch
 
 # --------------------------------------------------------------------------------------------------------------------
 # TODO: MLP Architecture
@@ -60,38 +61,32 @@ class DCGanEncoder(nn.Module):
         return h4
 
 
-class LinearToChannels2d(nn.Linear):
-    """Reshape 2d Variable to 4d after Linear layer"""
-
-    def __init__(self, m, n, w=1, h=None, **kw):
-        h = h or w
-        super().__init__(m, n * w * h, **kw)
-        self.w = w
-        self.h = h
-
-    def forward(self, x):
-        b = x.size(0)
-        return super().forward(x).view(b, -1, self.w, self.h)
-
-
 class DCGanDecoder(nn.Module):
-    def __init__(self, z_dim):
+    def __init__(self, D):
         super(DCGanDecoder, self).__init__()
-        n_filters = 64
 
-        self.fc1 = nn.Linear(z_dim, 1024)
-        self.LineartoChannel = LinearToChannels2d(1024, n_filters * 2, 7, 7)
-        self.conv1 = nn.ConvTranspose2d(n_filters * 2, n_filters, 4, 2, 1)
-        self.conv2 = nn.ConvTranspose2d(n_filters, 1, 4, 2, 1)
+        self.D = D
+        ngf = 32  # number of filters
+        nc = 1  # number of channels, change for colour to 3
 
-        self.relu = nn.ReLU()
-        self.sigmoid = nn.Sigmoid()
+        self.network = nn.Sequential(
+            nn.ConvTranspose2d(D, ngf * 4, 4, 1, 0, bias=False),
+            nn.BatchNorm2d(ngf * 4),
+            nn.ReLU(True),
+
+            nn.ConvTranspose2d(ngf * 4, ngf * 2, 3, 2, 1, bias=False),
+            nn.BatchNorm2d(ngf * 2),
+            nn.ReLU(True),
+
+            nn.ConvTranspose2d(ngf * 2, ngf, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(ngf),
+            nn.ReLU(True),
+
+            nn.ConvTranspose2d(ngf, nc, 4, 2, 1, bias=False),
+            nn.Tanh()
+        )
 
     def forward(self, z):
-        h1 = self.relu(self.fc1(z))
-        h2 = self.relu(self.LineartoChannel(h1))
-
-        h3 = self.relu(self.conv1(h2))
-        h4 = self.sigmoid(self.conv2(h3)) # logits
-
-        return h4
+        z = z.reshape(-1, self.D, 1, 1) # TODO: check this
+        logits = self.network(z)
+        return logits
