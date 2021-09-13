@@ -97,7 +97,6 @@ class GenerativeModel(nn.Module):
         else:
             raise NotImplementedError
 
-
     def get_decoder_network(self):
         decoder_network = None
 
@@ -112,6 +111,6 @@ class GenerativeModel(nn.Module):
             raise NotImplementedError
 
         elif self.decoder_network_type == "dcgan":
-            decoder_network = DCGanDecoder(z_dim=self.D)
+            decoder_network = DCGanDecoder(D=self.D)
 
         return decoder_network

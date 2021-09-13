@@ -23,7 +23,19 @@ def main():
 
     vae_model = VaeModel(args=args)
 
-    trainer = pl.Trainer()
+    # not used now: accumulate_grad_batches, amp_backend="native", auto_scale_batch_size
+    # gpus=-1, auto_select_gpus=True # automatically use as many gpus you can find
+
+    # run learning rate finder, results override hparams.learning_rate
+    # trainer = Trainer(auto_lr_find=True)
+    # auto_lr_find = 'my_lr_arg')
+    # # call tune to find the lr
+    # trainer.tune(model)
+
+    trainer = pl.Trainer(accelerator="ddp" if args.ddp else None,
+                         benchmark=True,
+                         deterministic=True,
+                         )
 
     trainer.fit(vae_model, data_loaders["train"], data_loaders["valid"])
 

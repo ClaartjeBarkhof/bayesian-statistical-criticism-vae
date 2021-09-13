@@ -83,7 +83,7 @@ def preprare_parser(jupyter=False, print_settings=True):
                              "  - isotropic_gaussian"
                              "  - ...")
     # p_x_z_type: [bernoulli, gaussian, categorical]
-    parser.add_argument("--p_x_z_type", default="gaussian", type=str,
+    parser.add_argument("--p_x_z_type", default="bernoulli", type=str,
                         help="Which type of predictive p_x_z distribution to use, options:"
                              "  - bernoulli"
                              "  - gaussian"
@@ -97,7 +97,7 @@ def preprare_parser(jupyter=False, print_settings=True):
 
     # ----------------------------------------------------------------------------------------------------------------
     # IMAGE DATASET ARGUMENTS
-    parser.add_argument("--image_dataset_name", default='mnist', type=str, help="The name of the image dataset.")
+    parser.add_argument("--image_dataset_name", default='bmnist', type=str, help="The name of the image dataset.")
     parser.add_argument("--image_w", default=28, type=int, help="The width of the images in the data set.")
     parser.add_argument("--image_h", default=28, type=int, help="The height of the images in the data set.")
 
@@ -145,6 +145,8 @@ def preprare_parser(jupyter=False, print_settings=True):
 
     # ----------------------------------------------------------------------------------------------------------------
     # PARSE & PRINT & RETURN
+
+    # TODO: add seed & deterministic
 
     if jupyter:
         sys.argv = [sys.argv[0]]

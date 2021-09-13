@@ -23,6 +23,14 @@ import numpy as np
 #     def test_loader(self):
 #         pass
 
+def greater_than_zero(x):
+    return x > 0
+
+
+def to_float(x):
+    return x.float()
+
+
 class ImageDataset:
     def __init__(self, args):
 
@@ -33,26 +41,32 @@ class ImageDataset:
         self.batch_size = args.batch_size
         self.num_workers = args.num_workers
 
-        # -------------------------------------------------------------------------------------------------------------
+        # -------------------------------
         # TRANSFORMS
+        # -------------------------------
+
         self.img_transforms = []
 
         # RESIZE
         if not self.image_h == self.image_w == 28:
             self.img_transforms += [transforms.Resize((self.image_h, self.image_w))]
 
-        # TO TENSOR
-        self.img_transforms += [transforms.ToTensor()]
+        # TO TENSOR + NORMALISE
+        self.img_transforms += [transforms.ToTensor(), transforms.Normalize(mean=(0.1307,), std=(0.3081,))]
 
         # BINARISE
         if self.image_dataset_name == "bmnist":
-            self.img_transforms += [transforms.Normalize((0.1307,), (0.3081,)), lambda x: x > 0, lambda x: x.float()]
+            self.img_transforms += [greater_than_zero, to_float]
 
         # COMPOSE
         self.img_transforms = transforms.Compose(self.img_transforms)
 
-        # ------------------------------------------------------------------------------------------------------------
-        # MNIST train, valid, test = 55000, 5000, 10000
+        # -------------------------------
+        # LOADING DATA SETS
+        # -------------------------------
+
+        # MNIST + BMNIST
+        # Sizes: train, valid, test = 55000, 5000, 10000
         if self.image_dataset_name in ["mnist", "bmnist"]:
             self.train_set = Subset(
                 datasets.MNIST(self.data_dir, train=True, download=True, transform=self.img_transforms),
@@ -76,6 +90,4 @@ class ImageDataset:
         test_loader = DataLoader(self.test_set, batch_size=self.batch_size, shuffle=True, num_workers=self.num_workers)
         return test_loader
 
-
 # if __name__ == "__main__":
-
