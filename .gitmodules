@@ -7,3 +7,6 @@
 [submodule "vae_model/pixel-cnn-pp"]
 	path = vae_model/pixel-cnn-pp
 	url = https://github.com/pclucas14/pixel-cnn-pp.git
+[submodule "sylvester-flows"]
+	path = sylvester-flows
+	url = https://github.com/riannevdberg/sylvester-flows.git
