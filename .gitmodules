@@ -1,3 +1,9 @@
 [submodule "pytorch-constrained-opt"]
 	path = pytorch-constrained-opt
 	url = https://github.com/eelcovdw/pytorch-constrained-opt.git
+[submodule "vae_model/pytorch-made"]
+	path = vae_model/pytorch-made
+	url = https://github.com/karpathy/pytorch-made.git
+[submodule "vae_model/pixel-cnn-pp"]
+	path = vae_model/pixel-cnn-pp
+	url = https://github.com/pclucas14/pixel-cnn-pp.git
