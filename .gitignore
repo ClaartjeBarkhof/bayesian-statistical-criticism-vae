@@ -132,4 +132,6 @@ dmypy.json
 .idea/
 .DS_Store
 /data/
+check_dataset_dataloader.ipynb
+check_inference_model.ipynb
 /lightning_logs/
