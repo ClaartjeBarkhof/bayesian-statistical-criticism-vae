@@ -13,13 +13,11 @@ class VaeModel(pl.LightningModule):
         self.L = args.max_seq_len
         self.V = args.vocab_size
         self.B = args.batch_size
-        self.W = args.image_w
-        self.H = args.image_h
+        self.image_w_h = args.image_w_h
 
         self.args = args
 
-
-        # Inference + generative model (encoder + decoder)
+        # VAE = Inference model (encoder) + generative model (decoder)
         self.inf_model = InferenceModel(args=args)
         self.gen_model = GenerativeModel(args=args)
 

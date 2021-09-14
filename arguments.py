@@ -3,7 +3,7 @@ import configargparse
 import sys
 
 
-def preprare_parser(jupyter=False, print_settings=True):
+def prepare_parser(jupyter=False, print_settings=True):
     parser = configargparse.ArgParser()
     parser.add_argument('--config_file', required=False, is_config_file=True, help='config file path')
 
@@ -58,19 +58,12 @@ def preprare_parser(jupyter=False, print_settings=True):
     # ----------------------------------------------------------------------------------------------------------------
     # ARCHITECTURE
     parser.add_argument("--latent_dim", default=32, type=int, help="Dimensionality of the latent space.")
-    # dcgan, convolutional, mlp
-    parser.add_argument("--encoder_network_type", default="dcgan", type=str,
-                        help="Which architecture to use for encoder, options:"
-                             "  - dcgan"
-                             "  - mlp"
-                             "  - convolutional")
-    # dcgan, pixelcnn, deconvolutional, mlp
-    parser.add_argument("--decoder_network_type", default="dcgan", type=str,
-                        help="Which architecture to use for encoder, options:"
-                             "  - dcgan"
-                             "  - mlp"
-                             "  - deconvolutional"
-                             "  - pixelcnn")
+    parser.add_argument("--decoder_network_type", default="basic_decoder", type=str,
+                        help="Which architecture / distribution structure to use for decoder, options:"
+                             "  - basic_decoder:"
+                             "      p(x|z)"
+                             "  - conditional_decoder:"
+                             "      p(x_d|z, x<d)")
     # ----------------------------------------------------------------------------------------------------------------
     # DISTRIBUTION TYPES
     # independent_gaussian, ...

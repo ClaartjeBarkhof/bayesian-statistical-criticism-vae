@@ -1,8 +1,8 @@
 import torch.nn as nn
 import torch.distributions as td
-from .architectures_2 import EncoderGatedConvolutionBlock
+from vae_model.architectures import EncoderGatedConvolutionBlock
 import torch
-from made import MADE
+from vae_model.made import MADE
 
 
 class InferenceModel(nn.Module):
@@ -14,14 +14,12 @@ class InferenceModel(nn.Module):
         self.L = args.max_seq_len
         self.V = args.vocab_size
         self.B = args.batch_size
-        self.W = args.image_w
-        self.H = args.image_h
+        self.image_w_h = args.image_w_h
         self.image_or_language = args.image_or_language
         self.data_distribution = args.data_distribution
 
         # NETWORK
         # an encoder that maps x to params of q_z_x
-        self.encoder_network_type = args.encoder_network_type
         self.encoder_network = self.get_encoder_network()
 
         # POSTERIOR DISTRIBUTION
@@ -46,7 +44,7 @@ class InferenceModel(nn.Module):
         """Retrieves the right mapper from the NN block to the actual posterior distribution to work with."""
         if self.q_z_x_type == "independent_gaussian":
             return IndependentGaussianBlock(args=self.args)
-        elif self.q_z_x_type == "condition_gaussian_made":
+        elif self.q_z_x_type == "conditional_gaussian_made":
             return ConditionalGaussianBlockMADE(args=self.args)
         elif self.q_z_x_type == "iaf":
             # TODO: return IAF(args=self.args)
@@ -64,7 +62,7 @@ class InferenceModel(nn.Module):
     def forward(self, x_in, n_samples=1):
         # [S, B, D]
         q_z_x = self.infer_q_z_x(x_in)
-        z_post = q_z_x.rsample(sample_shape=(n_samples,))
+        z_post = q_z_x.rsample() # TODO: sample_shape=(n_samples,)
 
         return q_z_x, z_post
 
@@ -96,7 +94,7 @@ class AutoRegressiveGaussianDistribution(nn.Module):
 
         self.z_sample = z_sample
 
-        assert self.made is not None or (self.mus_inferred is not None and self.logvars_inferred is not None), \
+        assert made_block is not None or (mus_inferred is not None and logvars_inferred is not None), \
             "Either give a MADE as input or the inferred mus and logvars"
 
         self.made_block = made_block # ConditionalGaussianBlockMADE: careful this is more than the MADE itself
@@ -105,11 +103,11 @@ class AutoRegressiveGaussianDistribution(nn.Module):
 
     def log_prob(self, z):
         if self.mus_inferred is None or self.logvars_inferred is None:
-            output_made = self.made(z)
+            output_made = self.made_block(z)
             params_split = torch.split(output_made, 2, dim=1)
             mean, logvar = params_split[0], params_split[1]
         else:
-            mu, logvar = self.mus_inferred, self.logvars_inferred
+            mean, logvar = self.mus_inferred, self.logvars_inferred
 
         scale = logvar.mul(0.5).exp_()
         log_q_z_x = td.Independent(td.Normal(loc=mean, scale=scale), 1).log_prob(z)
@@ -123,7 +121,7 @@ class ConditionalGaussianBlockMADE(nn.Module):
     def __init__(self, args):
         super(ConditionalGaussianBlockMADE, self).__init__()
 
-        self.D = args.D
+        self.D = args.latent_dim
         self.mapping_layer = nn.Linear(256, self.D)
 
         hiddens = [200, 220]

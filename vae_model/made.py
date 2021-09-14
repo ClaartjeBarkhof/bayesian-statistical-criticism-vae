@@ -145,8 +145,11 @@ class MADE(nn.Module):
         # all dimensions condition except for the first
         for i in range(self.nin):
             mus_logvars = self.forward(z_sample)
+            #print("before split", mus_logvars.shape)
             # split in 2 x [B, D]
-            mus, logvars = torch.split(mus_logvars, 2, dim=1)
+            mus_logvars = torch.split(mus_logvars, 2, dim=1)
+            #print("after split", mus_logvars)
+            mus, logvars = mus_logvars[0], mus_logvars[1]
             mus_inferred[:, i] = mus[:, i]
             logvars_inferred[:, i] = logvars[:, i]
             std_i = logvars[:, i].mul(0.5).exp_()

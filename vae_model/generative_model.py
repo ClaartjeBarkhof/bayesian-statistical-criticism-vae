@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.distributions as td
-from .architectures import DCGanDecoder
+# from .architectures import DCGanDecoder
 
 
 class GenerativeModel(nn.Module):
@@ -9,26 +9,26 @@ class GenerativeModel(nn.Module):
         super(GenerativeModel, self).__init__()
 
         self.D = args.latent_dim
+        self.B = args.batch_size
 
         # LANGUAGE
         self.L = args.max_seq_len
         self.V = args.vocab_size
 
         # IMAGE
-        self.B = args.batch_size
-        self.W = args.image_w
-        self.H = args.image_h
+        self.image_w_h = args.image_w_h
 
         # NETWORK
         # a decoder that maps z (+ x) to params of p_x_z
         self.decoder_network_type = args.decoder_network_type
+        assert self.decoder_network_type in ["basic_decoder", "conditional_decoder"]
         self.decoder_network = self.get_decoder_network()
 
         # PRIOR
         self.p_z_type = args.p_z_type
 
         # OUTPUT DISTRIBUTION
-        self.p_x_z_type = args.p_x_z_type
+        self.p_x_z_type = args.p_x_z_type #TODO: is this necessary? it is already defined by args.data_distribtion
 
     def sample_generative_model(self, S=1):
         z_prior = self.sample_prior(S=S)
@@ -111,6 +111,7 @@ class GenerativeModel(nn.Module):
             raise NotImplementedError
 
         elif self.decoder_network_type == "dcgan":
-            decoder_network = DCGanDecoder(D=self.D)
+            pass
+            # decoder_network = DCGanDecoder(D=self.D)
 
         return decoder_network
