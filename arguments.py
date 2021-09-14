@@ -2,6 +2,7 @@ import distutils
 import configargparse
 import sys
 
+
 def preprare_parser(jupyter=False, print_settings=True):
     parser = configargparse.ArgParser()
     parser.add_argument('--config_file', required=False, is_config_file=True, help='config file path')
@@ -56,7 +57,7 @@ def preprare_parser(jupyter=False, print_settings=True):
 
     # ----------------------------------------------------------------------------------------------------------------
     # ARCHITECTURE
-    parser.add_argument("--latent_dim", default=16, type=int, help="Dimensionality of the latent space.")
+    parser.add_argument("--latent_dim", default=32, type=int, help="Dimensionality of the latent space.")
     # dcgan, convolutional, mlp
     parser.add_argument("--encoder_network_type", default="dcgan", type=str,
                         help="Which architecture to use for encoder, options:"
@@ -94,13 +95,15 @@ def preprare_parser(jupyter=False, print_settings=True):
     parser.add_argument("--data_dir", default='data', type=str, help="The name of the data directory.")
     parser.add_argument("--image_or_language", default='image', type=str,
                         help="The type of the dataset, options: 'image' or 'language'.")
+    parser.add_argument("--data_distribution", default='bernoulli', type=str,
+                        help="The type of data distribution, bernoulli for binary inputs and"
+                             "multinomial for categorical inputs.")
 
     # ----------------------------------------------------------------------------------------------------------------
     # IMAGE DATASET ARGUMENTS
     parser.add_argument("--image_dataset_name", default='bmnist', type=str, help="The name of the image dataset.")
-    parser.add_argument("--image_w", default=28, type=int, help="The width of the images in the data set.")
-    parser.add_argument("--image_h", default=28, type=int, help="The height of the images in the data set.")
-
+    parser.add_argument("--image_w_h", default=28, type=int, help="The width and height of the (square) images in the data set.")
+    parser.add_argument("--n_channels", default=1, type=int, help="The name of the image dataset.")
 
     # ----------------------------------------------------------------------------------------------------------------
     # LANGUAGE DATASET ARGUMENTS

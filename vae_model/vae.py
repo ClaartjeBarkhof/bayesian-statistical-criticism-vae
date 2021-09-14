@@ -18,6 +18,7 @@ class VaeModel(pl.LightningModule):
 
         self.args = args
 
+
         # Inference + generative model (encoder + decoder)
         self.inf_model = InferenceModel(args=args)
         self.gen_model = GenerativeModel(args=args)
