@@ -1,12 +1,14 @@
 import torch
 import torch.nn as nn
 import torch.distributions as td
-# from .architectures import DCGanDecoder
+from vae_model.architectures import DecoderGatedConvolutionBlock
 
 
 class GenerativeModel(nn.Module):
     def __init__(self, args):
         super(GenerativeModel, self).__init__()
+
+        self.args = args
 
         self.D = args.latent_dim
         self.B = args.batch_size
@@ -17,6 +19,7 @@ class GenerativeModel(nn.Module):
 
         # IMAGE
         self.image_w_h = args.image_w_h
+        self.C = args.n_channels
 
         # NETWORK
         # a decoder that maps z (+ x) to params of p_x_z
@@ -98,20 +101,10 @@ class GenerativeModel(nn.Module):
             raise NotImplementedError
 
     def get_decoder_network(self):
-        decoder_network = None
-
-        # TODO: implement simple deconvolutional
-        if self.decoder_network_type == "deconvolutional":
+        if self.decoder_network_type == "basic_decoder":
+            return DecoderGatedConvolutionBlock(args=self.args)
+        elif self.decoder_network_type == "conditional_decoder":
             raise NotImplementedError
-
-        # TODO: implement pixel_cnn
-        # check https://github.com/pclucas14/pixel-cnn-pp/blob/master/model.py
-        # check modifications in paper Alemi (page 20) https://arxiv.org/pdf/1711.00464.pdf
-        elif self.decoder_network_type == "pixel_cnn":
-            raise NotImplementedError
-
-        elif self.decoder_network_type == "dcgan":
-            pass
-            # decoder_network = DCGanDecoder(D=self.D)
-
-        return decoder_network
+        else:
+            raise ValueError(f"{self.decoder_network_type} is not a valid decoder_network_type, choose: "
+                             f"'basic_decoder' or 'conditional_decoder'")

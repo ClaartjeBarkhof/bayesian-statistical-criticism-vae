@@ -113,6 +113,8 @@ def assert_data_arguments(args):
     assert not (args.image_dataset_name in ["fmnist", "mnist"] and args.data_distribution == "bernoulli"), \
         f"If the data set is MNIST or Fashion MNIST, the data distribution should be set to " \
         f"multinomial, currently set to {args.data_distribution}."
+    assert not (args.image_dataset_name in ["bminst", "fmnist", "mnist"] and not args.n_channels == 1), \
+        f"{args.image_dataset_name} is a 1-channel dataset."
 
 
 def greater_than_zero(x):

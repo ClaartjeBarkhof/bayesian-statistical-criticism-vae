@@ -1,8 +1,9 @@
+import torch
 import torch.nn as nn
 import torch.distributions as td
-from vae_model.architectures import EncoderGatedConvolutionBlock
-import torch
+
 from vae_model.made import MADE
+from vae_model.architectures import EncoderGatedConvolutionBlock
 
 
 class InferenceModel(nn.Module):
@@ -53,6 +54,7 @@ class InferenceModel(nn.Module):
             raise ValueError(f"This posterior type q_z_x_type is not recognised: {self.q_z_x_type}")
 
     def infer_q_z_x(self, x_in):
+        """Infers a distribution from encoding the input x_in."""
         # [B, 256]
         q_z_x_params = self.q_z_nn(x_in)
         q_z_x = self.q_z_x_block(q_z_x_params)
@@ -60,6 +62,7 @@ class InferenceModel(nn.Module):
         return q_z_x
 
     def forward(self, x_in, n_samples=1):
+        """Infers a distribution and samples from it with the reparameterisation trick."""
         # [S, B, D]
         q_z_x = self.infer_q_z_x(x_in)
         z_post = q_z_x.rsample() # TODO: sample_shape=(n_samples,)
