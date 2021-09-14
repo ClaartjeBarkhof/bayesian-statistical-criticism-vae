@@ -31,6 +31,7 @@ class GenerativeModel(nn.Module):
         self.p_z_type = args.p_z_type
         assert self.p_z_type in ["isotropic_gaussian", "mog"]
 
+        # MIXTURE OF GAUSIANS PRIOR
         if self.p_z_type == "mog":
             self.mog_n_components = args.mog_n_components
             self.mix_components = torch.nn.Parameter(torch.rand(self.mog_n_components), requires_grad=True)

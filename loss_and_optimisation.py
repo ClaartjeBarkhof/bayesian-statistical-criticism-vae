@@ -3,7 +3,9 @@ from torch.distributions import kl_divergence
 from torch.optim import RMSprop
 import torch
 import torch.nn as nn
+import torch.distributions as td
 import numpy as np
+from vae_model.inference_model import AutoRegressiveGaussianDistribution
 
 # TODO: total correlation, dimensionwise KL
 # TODO: Free bits KL for Non-Gaussian case
@@ -13,6 +15,7 @@ class Objective(nn.Module):
         super(Objective, self).__init__()
 
         self.objective = args.objective
+        self.data_distribution = args.data_distribution
         self.image_or_language = args.image_or_language
         self.args = args
 
@@ -22,10 +25,11 @@ class Objective(nn.Module):
             self.mdr_optimiser = ConstraintOptimizer(RMSprop(), self.mdr_constraint.parameters(), 0.00005)
 
     def compute_loss(self, x_in, q_z_x, z_post, p_z, p_x_z):
-        # TODO: should be something along the lines of x[:, 1:] (cutting of the start token)
-        if self.image_or_language == "language":
-            labels = torch.tensor(np.random.randint(0, self.V, size=(self.B, self.L)))
+        if self.image_or_language == "image" and self.data_distribution == "multinomial":
+            num_classes = 256
+            labels = (x_in * (num_classes - 1)).long()
         else:
+            # TODO: for language should be something along the lines of x[:, 1:] (cutting of the start token)
             labels = x_in
 
         # TODO: implement other types of losses
@@ -79,7 +83,13 @@ class Objective(nn.Module):
         if analytical:
             # TODO: this is not possible for all
             # [B] (summed over latent dimension)
-            kl = kl_divergence(q_z_x, p_z)
+            if isinstance(q_z_x, AutoRegressiveGaussianDistribution):
+                scale = q_z_x.logvars_inferred.mul(0.5).exp_()
+                q_z_x_dist = td.Independent(td.Normal(loc=q_z_x.mus_inferred, scale=scale), 1)
+            else:
+                q_z_x_dist = q_z_x
+
+            kl = kl_divergence(q_z_x_dist, p_z).mean()
 
         else:
             # [1, B]

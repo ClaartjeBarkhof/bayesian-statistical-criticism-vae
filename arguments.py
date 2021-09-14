@@ -98,7 +98,8 @@ def prepare_parser(jupyter=False, print_settings=True):
     # ----------------------------------------------------------------------------------------------------------------
     # IMAGE DATASET ARGUMENTS
     parser.add_argument("--image_dataset_name", default='bmnist', type=str, help="The name of the image dataset.")
-    parser.add_argument("--image_w_h", default=28, type=int, help="The width and height of the (square) images in the data set.")
+    parser.add_argument("--image_w_h", default=28, type=int, help="The width and height of the (square) "
+                                                                  "images in the data set.")
     parser.add_argument("--n_channels", default=1, type=int, help="The name of the image dataset.")
 
     # ----------------------------------------------------------------------------------------------------------------

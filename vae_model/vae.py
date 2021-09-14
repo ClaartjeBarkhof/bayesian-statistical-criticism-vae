@@ -31,15 +31,15 @@ class VaeModel(pl.LightningModule):
         # Make predictions / generate based on the inferred latent
         # Language: Categorical of [B, L]
         # Image: Bernoulli or Gaussian of [W, H]
-        p_x_z = self.gen_model(x_in=x_in, z_post=z_post)
+        p_x_z = self.gen_model(x_in=x_in, z_post=z_post)  # distribution object
 
         # Get the prior of the generative model
-        p_z = self.gen_model.p_z()
+        p_z = self.gen_model.p_z  # distribution object
 
         return q_z_x, z_post, p_z, p_x_z
 
     def training_step(self, x_in_labels_in, batch_idx):
-        x_in, labels_in = x_in_labels_in[0], x_in_labels_in[1]
+        x_in, labels_in = x_in_labels_in[0], x_in_labels_in[1]  # TODO: no use for labels_in
 
         q_z_x, z_post, p_z, p_x_z = self.forward(x_in)
 

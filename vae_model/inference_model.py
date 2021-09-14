@@ -79,6 +79,7 @@ class IndependentGaussianBlock(nn.Module):
         self.mean_layer = nn.Linear(256, self.D)
         self.logvar_layer = nn.Linear(256, self.D)
 
+
     def forward(self, q_z_x_params):
 
         mean = self.mean_layer(q_z_x_params)
