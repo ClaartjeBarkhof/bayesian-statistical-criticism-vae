@@ -75,7 +75,10 @@ def prepare_parser(jupyter=False, print_settings=True):
     parser.add_argument("--p_z_type", default="isotropic_gaussian", type=str,
                         help="Which type of prior distribution to use, options:"
                              "  - isotropic_gaussian"
-                             "  - ...")
+                             "  - mog")
+    parser.add_argument("--mog_n_components", default=20, type=int,
+                        help="If using Mixture of Gaussians as prior, "
+                             "this parameter sets the number of learned components.")
     # p_x_z_type: [bernoulli, gaussian, categorical]
     parser.add_argument("--p_x_z_type", default="bernoulli", type=str,
                         help="Which type of predictive p_x_z distribution to use, options:"

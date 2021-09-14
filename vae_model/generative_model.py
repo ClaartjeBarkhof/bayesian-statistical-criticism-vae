@@ -29,9 +29,18 @@ class GenerativeModel(nn.Module):
 
         # PRIOR
         self.p_z_type = args.p_z_type
+        assert self.p_z_type in ["isotropic_gaussian", "mog"]
 
-        # OUTPUT DISTRIBUTION
-        self.p_x_z_type = args.p_x_z_type #TODO: is this necessary? it is already defined by args.data_distribtion
+        if self.p_z_type == "mog":
+            self.mog_n_components = args.mog_n_components
+            self.mix_components = torch.nn.Parameter(torch.rand(self.mog_n_components), requires_grad=True)
+            self.component_means = torch.nn.Parameter(torch.randn(self.mog_n_components, self.D), requires_grad=True)
+            self.component_scales = torch.nn.Parameter(torch.abs(torch.randn(self.mog_n_components, self.D)), requires_grad=True)
+
+        self.p_z = self.init_p_z()
+
+        # OUTPUT DISTRIBUTION == DATA DISTRIBUTION
+        self.p_x_z_type = args.data_distribution
 
     def sample_generative_model(self, S=1):
         z_prior = self.sample_prior(S=S)
@@ -72,33 +81,33 @@ class GenerativeModel(nn.Module):
         return z_prior
 
     def p_x_z(self, z, x=None):
-        p_x_z_params = self.decoder_network(z)  # TODO: some decoder networks take x as additional input
+        p_x_z_params = self.decoder_network(z)
 
-        p_x_z = None
         if self.p_x_z_type == "bernoulli":
-            # TODO: apply sigmoid?, as the output of DCGAN is tanh
             p_x_z = td.Independent(td.Bernoulli(logits=p_x_z_params), 1)
 
-        elif self.p_x_z_type == "gaussian":
-            p_x_z = td.Independent(td.Normal(loc=p_x_z_params, scale=torch.ones_like(p_x_z_params)), 1)
-
-        elif self.p_x_z_type == "categorical":
-            # TODO: implement Categorical output
-            # p_x_z_params: [B, L, V]
+        elif self.p_x_z_type == "multinomial":
             p_x_z = td.Categorical(logits=p_x_z_params)
 
         else:
-            # TODO: implement other options
-            raise NotImplementedError
+            raise ValueError(f"{self.p_x_z_type} is not a valid data_distribution, choices: bernoulli, multinomial")
 
         return p_x_z
 
-    def p_z(self):
+    def init_p_z(self):
+        # ISOTROPIC GAUSSIAN
         if self.p_z_type == "isotropic_gaussian":
             return td.Independent(td.Normal(loc=torch.zeros(self.D), scale=torch.ones(self.D)), 1)
-        # TODO: add other priors
+
+        # MIXTURE OF GAUSSIANS
+        elif self.p_z_type == "mog":
+
+            mix = td.Categorical(self.mix_components)
+            comp = td.Independent(td.Normal(self.component_means, self.component_scales), 1)
+
+            return td.MixtureSameFamily(mix, comp)
         else:
-            raise NotImplementedError
+            raise ValueError(f"{self.p_z_type} is not a valid p_z_type, choices: isotropic_gaussian, mog")
 
     def get_decoder_network(self):
         if self.decoder_network_type == "basic_decoder":
