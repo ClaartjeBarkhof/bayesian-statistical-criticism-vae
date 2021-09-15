@@ -135,23 +135,20 @@ class MADE(nn.Module):
                 h = self.hidden_activation(t(h) + c(context))
             return self.net[-1](h)  # output layer
 
-    def auto_regressive_gaussian_forward(self, made_initial_input):
+    # TODO: multi sample forward?
+    def auto_regressive_sampling(self, q_z_x_params):
+        B = q_z_x_params.shape[0]
 
-        z_sample = made_initial_input
+        z_sample = torch.zeros((B, self.nin))
+        mus_inferred, logvars_inferred = [], []
 
-        mus_inferred = torch.zeros_like(made_initial_input)
-        logvars_inferred = torch.zeros_like(made_initial_input)
-
-        # all dimensions condition except for the first
         for i in range(self.nin):
             mus_logvars = self.forward(z_sample)
-            #print("before split", mus_logvars.shape)
             # split in 2 x [B, D]
             mus_logvars = torch.split(mus_logvars, 2, dim=1)
-            #print("after split", mus_logvars)
             mus, logvars = mus_logvars[0], mus_logvars[1]
-            mus_inferred[:, i] = mus[:, i]
-            logvars_inferred[:, i] = logvars[:, i]
+            mus_inferred.append(mus[:, i])
+            logvars_inferred.append(logvars[:, i])
             std_i = logvars[:, i].mul(0.5).exp_()
             z_sample[:, i] = td.Normal(loc=mus[:, i], scale=std_i).rsample()
 

@@ -126,7 +126,7 @@ class ConditionalGaussianBlockMADE(nn.Module):
         super(ConditionalGaussianBlockMADE, self).__init__()
 
         self.D = args.latent_dim
-        self.mapping_layer = nn.Linear(256, self.D)
+        #self.mapping_layer = nn.Linear(256, self.D)
 
         hiddens = [200, 220]
 
@@ -134,13 +134,13 @@ class ConditionalGaussianBlockMADE(nn.Module):
         act = nn.ReLU()
 
         self.made_block = MADE(self.D, hiddens, int(self.D * 2), natural_ordering=natural_ordering,
-                               context_size=0, hidden_activation=act)  # no additional context here
+                               context_size=256, hidden_activation=act)  # no additional context here
 
     def forward(self, q_z_x_params):
-        made_initial_input = self.mapping_layer(q_z_x_params)
+        #made_initial_input = self.mapping_layer(q_z_x_params)
 
         # All [B, D]
-        z_sample, mus_inferred, logvars_inferred = self.made_block.auto_regressive_gaussian_forward(made_initial_input)
+        z_sample, mus_inferred, logvars_inferred = self.made_block.auto_regressive_sampling(q_z_x_params)
 
         # Placeholder distribution object
         q_z_x = AutoRegressiveGaussianDistribution(z_sample=z_sample, mus_inferred=mus_inferred,
