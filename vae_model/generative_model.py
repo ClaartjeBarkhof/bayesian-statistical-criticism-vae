@@ -1,8 +1,10 @@
 import torch
 import torch.nn as nn
 import torch.distributions as td
-from vae_model.architectures import DecoderGatedConvolutionBlock
 
+from vae_model.sylvester_flows.models.layers import GatedConvTranspose2d
+from vae_model.distributions import AutoRegressiveDistribution
+from vae_model.made import MADE
 
 class GenerativeModel(nn.Module):
     def __init__(self, args):
@@ -24,12 +26,11 @@ class GenerativeModel(nn.Module):
         # NETWORK
         # a decoder that maps z (+ x) to params of p_x_z
         self.decoder_network_type = args.decoder_network_type
-        assert self.decoder_network_type in ["basic_decoder", "conditional_decoder"]
+
         self.decoder_network = self.get_decoder_network()
 
         # PRIOR
         self.p_z_type = args.p_z_type
-        assert self.p_z_type in ["isotropic_gaussian", "mog"]
 
         # MIXTURE OF GAUSIANS PRIOR
         if self.p_z_type == "mog":
@@ -82,27 +83,23 @@ class GenerativeModel(nn.Module):
 
         return z_prior
 
-    def p_x_z(self, z, x=None):
-
-        # image: shape
-        p_x_z_params = self.decoder_network(z)
-
-        #print("p_x_z_params.shape", p_x_z_params.shape)
-
-        if self.p_x_z_type == "bernoulli":
-            # p_x_z_params: [B, C, W, H]
-            #print("XX p_x_z_params.shape", p_x_z_params.shape)
-            p_x_z = td.Independent(td.Bernoulli(logits=p_x_z_params), 1)
-
-        elif self.p_x_z_type == "multinomial":
-            #print("YY before permute", p_x_z_params.shape)
-            # image: p_x_z_params: [B, C, num_classes, W, H] -> [B, C, W, H, num_classes]
-            p_x_z_params = p_x_z_params.permute(0, 1, 3, 4, 2)
-            #print("XX p_x_z_params.shape", p_x_z_params.shape)
-            p_x_z = td.Categorical(logits=p_x_z_params)
-
+    def p_x_z(self, z):
+        if self.decoder_network_type == "conditional_made_decoder":
+            p_x_z = self.decoder_network(z)
         else:
-            raise ValueError(f"{self.p_x_z_type} is not a valid data_distribution, choices: bernoulli, multinomial")
+            p_x_z_params = self.decoder_network(z)
+
+            if self.p_x_z_type == "bernoulli":
+                # p_x_z_params: [B, C, W, H]
+                p_x_z = td.Independent(td.Bernoulli(logits=p_x_z_params), 1)
+
+            elif self.p_x_z_type == "multinomial":
+                # image: p_x_z_params: [B, C, num_classes, W, H] -> [B, C, W, H, num_classes]
+                p_x_z_params = p_x_z_params.permute(0, 1, 3, 4, 2)
+                p_x_z = td.Categorical(logits=p_x_z_params)
+
+            else:
+                raise ValueError(f"{self.p_x_z_type} is not a valid data_distribution, choices: bernoulli, multinomial")
 
         return p_x_z
 
@@ -122,10 +119,103 @@ class GenerativeModel(nn.Module):
             raise ValueError(f"{self.p_z_type} is not a valid p_z_type, choices: isotropic_gaussian, mog")
 
     def get_decoder_network(self):
-        if self.decoder_network_type == "basic_decoder":
+        if self.decoder_network_type == "basic_deconv_decoder":
             return DecoderGatedConvolutionBlock(args=self.args)
-        elif self.decoder_network_type == "conditional_decoder":
-            raise NotImplementedError
+
+        elif self.decoder_network_type == "conditional_made_decoder":
+            return ConditionalBernoulliBlockMADE(args=self.args)
+
         else:
-            raise ValueError(f"{self.decoder_network_type} is not a valid decoder_network_type, choose: "
-                             f"'basic_decoder' or 'conditional_decoder'")
+            raise NotImplementedError
+
+
+class ConditionalBernoulliBlockMADE(nn.Module):
+    def __init__(self, args):
+        super(ConditionalBernoulliBlockMADE, self).__init__()
+
+        self.X_dim = args.image_w_h * args.image_w_h * args.n_channels
+        self.D = args.latent_dim
+
+        hiddens = [200, 220]
+        natural_ordering = True
+        act = nn.ReLU()
+
+        self.made = MADE(self.X_dim, hiddens, self.X_dim, natural_ordering=natural_ordering,
+                         context_size=self.D, hidden_activation=act)  # no additional context here
+
+    def forward(self, z):
+        # Placeholder distribution object
+        p_x_z = AutoRegressiveDistribution(context=z, made=self.made, dist_type="bernoulli")
+
+        return p_x_z
+
+
+class DecoderGatedConvolutionBlock(nn.Module):
+    """
+    Maps z -> p_x_z_params
+
+    # This code is adapted from Rianne van de Berg's code (sylvester_flows submodule):
+    https://github.com/riannevdberg/sylvester-flows/blob/32dde9b7d696fee94f946a338182e542779eecfe/models/VAE.py
+
+    """
+    def __init__(self, args):
+        super(DecoderGatedConvolutionBlock, self).__init__()
+
+        self.num_classes = 256
+        self.D = args.latent_dim
+        self.C = args.n_channels
+        self.data_distribution = args.data_distribution
+        self.image_w_h = args.image_w_h
+
+        if self.image_w_h == 28:
+            self.last_kernel_size = 7
+        else:
+            raise ValueError('Only supporting input size 28 now.')
+
+        if self.data_distribution == 'bernoulli':
+            self.decoder_gated_cnn_block = nn.Sequential(
+                GatedConvTranspose2d(self.D, 64, self.last_kernel_size, 1, 0),
+                GatedConvTranspose2d(64, 64, 5, 1, 2),
+                GatedConvTranspose2d(64, 32, 5, 2, 2, 1),
+                GatedConvTranspose2d(32, 32, 5, 1, 2),
+                GatedConvTranspose2d(32, 32, 5, 2, 2, 1),
+                GatedConvTranspose2d(32, 32, 5, 1, 2),
+                # TODO: why did rianne separate this layer from the rest? (+ a sigmoid), she had extra nn.Sigmoid(),
+                nn.Conv2d(32, self.C, 1, 1, 0),
+
+            )
+
+        # output shape: batch_size, num_channels * num_classes, pixel_width, pixel_height
+        elif self.data_distribution == 'multinomial':
+            self.decoder_gated_cnn_block = nn.Sequential(
+                GatedConvTranspose2d(self.D, 64, self.last_kernel_size, 1, 0),
+                GatedConvTranspose2d(64, 64, 5, 1, 2),
+                GatedConvTranspose2d(64, 32, 5, 2, 2, 1),
+                GatedConvTranspose2d(32, 32, 5, 1, 2),
+                GatedConvTranspose2d(32, 32, 5, 2, 2, 1),
+                GatedConvTranspose2d(32, 32, 5, 1, 2),
+                # TODO: why did rianne separate these last two layers from the rest? (+ a sigmoid)
+                nn.Conv2d(32, 256, 5, 1, 2),
+                nn.Conv2d(256, self.C * self.num_classes, 1, 1, 0),
+            )
+        else:
+            raise ValueError(f"Data distribution type not implemented: {self.data_distribution}.")
+
+    def forward(self, z):
+        """z -> p_x_z params"""
+
+        B = z.size(0)
+        z = z.view(B, self.D, 1, 1)
+
+        # Multinomial: [B, C*256, image_w_h, image_w_h] (logits, pre-softmax)
+        # Bernoulli: [B, C, image_w_h, image_w_h] (logits, pre-sigmoid)
+
+        p_x_z_params = self.decoder_gated_cnn_block(z)
+
+        if self.C == 1 and self.data_distribution == "multinomial":
+            p_x_z_params = p_x_z_params.unsqueeze(1)
+        elif self.C == 3:
+            print("Code not checked for 3-channel input, implement something with reshape here.")
+            raise NotImplementedError
+
+        return p_x_z_params

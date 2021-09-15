@@ -1,11 +1,14 @@
-import torch
 import torch.nn as nn
-import torch.nn.functional as F
 import torch.distributions as td
 
+from vae_model.distributions import AutoRegressiveDistribution
 from vae_model.made import MADE
-from vae_model.architectures import EncoderGatedConvolutionBlock
 
+from vae_model.sylvester_flows.models.layers import GatedConv2d
+
+
+# --------------------------------------------------------------------------------------------------------------------
+# INFERENCE MODEL
 
 class InferenceModel(nn.Module):
     def __init__(self, args):
@@ -26,8 +29,6 @@ class InferenceModel(nn.Module):
 
         # POSTERIOR DISTRIBUTION
         self.q_z_x_type = args.q_z_x_type
-
-        assert self.q_z_x_type in ["independent_gaussian", "conditional_gaussian_made", "iaf"]
 
         self.q_z_nn = self.get_encoder_network()
         self.q_z_x_block = self.get_posterior_distribution_block()
@@ -58,9 +59,8 @@ class InferenceModel(nn.Module):
         """Infers a distribution from encoding the input x_in."""
         # [B, 256]
         q_z_x_params = self.q_z_nn(x_in)
-        #print("infer_q_z_x q_z_x_params", q_z_x_params.shape)
+
         q_z_x = self.q_z_x_block(q_z_x_params)
-        #print("infer_q_z_x q_z_x", q_z_x)
 
         return q_z_x
 
@@ -72,6 +72,9 @@ class InferenceModel(nn.Module):
 
         return q_z_x, z_post
 
+
+# --------------------------------------------------------------------------------------------------------------------
+# POSTERIOR DISTRIBUTION BLOCKS
 
 class IndependentGaussianBlock(nn.Module):
     def __init__(self, args):
@@ -92,103 +95,6 @@ class IndependentGaussianBlock(nn.Module):
         return q_z_x
 
 
-class AutoRegressiveGaussianDistribution(nn.Module):
-    def __init__(self, q_z_x_params, made, state=None):
-        super(AutoRegressiveGaussianDistribution, self).__init__()
-
-        self.q_z_x_params = q_z_x_params
-        self.made = made
-        self.D = self.made.nin
-        self.state = state  # z, mu, scale
-
-    def log_prob(self, z, mean_scale=None):
-        if mean_scale is not None:
-            mean, scale = mean_scale
-        elif self.state is not None:
-            mean, scale = self.state[1], self.state[2]
-        else:
-            output_made = self.made(z, context=self.q_z_x_params)
-            params_split = torch.split(output_made, 2, dim=1)
-            mean, pre_scale = params_split[0], params_split[1]
-            scale = F.softplus(pre_scale)
-
-        self.state = (z, mean, scale)
-
-        # careful that the distribution itself is not independent, but at this point it is valid to use for log_prob
-        log_q_z_x = td.Independent(td.Normal(loc=mean, scale=scale), 1).log_prob(z)
-
-        return log_q_z_x
-
-    def rsample(self):
-        # TODO: multi sample forward?
-        B = self.q_z_x_params.shape[0]
-
-        z_sample = torch.zeros((B, self.D))
-        mu_inferred, scale_inferred = [], []
-
-        for i in range(self.D):
-            mus_prescales = self.made(z_sample, context=self.q_z_x_params)
-            # split in 2 x [B, D]
-            mus_prescales = torch.split(mus_prescales, 2, dim=1)
-            mus, prescales = mus_prescales[0], mus_prescales[1]
-
-            mu_i = mus[:, i]
-            scale_i = F.softplus(prescales[:, i])
-
-            mu_inferred.append(mu_i)
-            scale_inferred.append(scale_i)
-
-            z_sample[:, i] = td.Normal(loc=mu_i, scale=scale_i).rsample()
-
-        mu_inferred = torch.stack(mu_inferred, dim=1)
-        scale_inferred = torch.stack(scale_inferred, dim=1)
-
-        self.state = (z_sample, mu_inferred, scale_inferred)
-
-        return z_sample
-
-
-@td.register_kl(AutoRegressiveGaussianDistribution, AutoRegressiveGaussianDistribution)
-def _kl(p, q):
-    if p.state is None:
-        _ = p.rsample()
-    p_mean, p_scale = p.state[1], p.state[2]
-
-    if q.state is None:
-        _ = q.rsample()
-    q_mean, q_scale = q.state[1], q.state[2]
-
-    kl = td.kl_divergence(td.Normal(loc=p_mean, scale=p_scale), td.Normal(loc=q_mean, scale=q_scale)).sum(-1)
-
-    return kl
-
-
-@td.register_kl(AutoRegressiveGaussianDistribution, td.Normal)
-def _kl(p, q):
-    if p.state is None:
-        _ = p.rsample()
-    p_mean, p_scale = p.state[1], p.state[2]
-
-    kl = td.kl_divergence(td.Normal(loc=p_mean, scale=p_scale), q).sum(-1)
-
-    return kl
-
-
-@td.register_kl(AutoRegressiveGaussianDistribution, td.Distribution)
-def _kl(p, q):
-    if p.state is None:
-        z = p.rsample()
-    else:
-        z = p.state[0]
-
-    log_p_z = p.log_prob(z)
-    log_q_z = q.log_prob(z)
-
-    kl = log_p_z - log_q_z
-
-    return kl
-
-
 class ConditionalGaussianBlockMADE(nn.Module):
     def __init__(self, args):
         super(ConditionalGaussianBlockMADE, self).__init__()
@@ -206,7 +112,7 @@ class ConditionalGaussianBlockMADE(nn.Module):
 
     def forward(self, q_z_x_params):
         # Placeholder distribution object
-        q_z_x = AutoRegressiveGaussianDistribution(q_z_x_params=q_z_x_params, made=self.made)
+        q_z_x = AutoRegressiveDistribution(context=q_z_x_params, made=self.made, dist_type="gaussian")
 
         return q_z_x
 
@@ -218,3 +124,71 @@ class IAF(nn.Module):
 
     def forward(self, q_z_x_params):
         raise NotImplementedError
+
+
+# --------------------------------------------------------------------------------------------------------------------
+# ARCHITECTURE
+
+class EncoderGatedConvolutionBlock(nn.Module):
+    """
+    Maps x -> q_z_x_params:
+        This class implements the basic convolutional neural block that maps an input image to a
+        vector q_z_x_params of size 256, which serves as an input to a distribution block (independent_gaussian,
+        conditional_gaussian_made or iaf).
+
+    # This code is adapted from Rianne van de Berg's code (sylvester_flows submodule):
+    https://github.com/riannevdberg/sylvester-flows/blob/32dde9b7d696fee94f946a338182e542779eecfe/models/VAE.py
+
+    """
+
+    def __init__(self, args):
+        super(EncoderGatedConvolutionBlock, self).__init__()
+
+        self.image_w_h = args.image_w_h
+        self.D = args.latent_dim
+        self.C = args.n_channels
+        self.q_z_x_type = args.q_z_x_type
+        self.data_distribution = args.data_distribution
+
+        if self.image_w_h == 28:
+            last_kernel_size = 7
+        else:
+            raise ValueError('Only supporting input size 28 now.')
+
+        if self.data_distribution == 'bernoulli':
+            self.encoder_gated_cnn_block = nn.Sequential(
+                GatedConv2d(self.C, 32, 5, 1, 2),
+                GatedConv2d(32, 32, 5, 2, 2),
+                GatedConv2d(32, 64, 5, 1, 2),
+                GatedConv2d(64, 64, 5, 2, 2),
+                GatedConv2d(64, 64, 5, 1, 2),
+                GatedConv2d(64, 256, last_kernel_size, 1, 0),
+            )
+
+        elif self.data_distribution == "multinomial":
+            self.encoder_gated_cnn_block = nn.Sequential(
+                GatedConv2d(self.C, 32, 5, 1, 2),
+                GatedConv2d(32, 32, 5, 2, 2),
+                GatedConv2d(32, 64, 5, 1, 2),
+                GatedConv2d(64, 64, 5, 2, 2),
+                GatedConv2d(64, 64, 5, 1, 2),
+                GatedConv2d(64, 256, last_kernel_size, 1, 0)
+            )
+            # TODO: Rianne has a Hardtanh actiation for her q_z_var:
+            #     q_z_var = nn.Sequential(
+            #         nn.Linear(256, self.D),
+            #         nn.Softplus(),
+            #         nn.Hardtanh(min_val=0.01, max_val=7.)
+            #     ), why was that there?
+        else:
+            raise ValueError(f"Data distribution type not implemented: {self.data_distribution}.")
+
+    def forward(self, x):
+        """Maps the input to a 256-dimensional vector q_z_x_params, which is the input to a distribution block."""
+        # [B, C=256, 1, 1]
+        q_z_x_params = self.encoder_gated_cnn_block(x)
+
+        # [B, 256]
+        q_z_x_params = q_z_x_params.squeeze(-1).squeeze(-1)
+
+        return q_z_x_params

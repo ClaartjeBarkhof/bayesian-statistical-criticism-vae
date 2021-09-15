@@ -26,8 +26,6 @@ from torch.utils.data import DataLoader, Subset
 class ImageDataset:
     def __init__(self, args):
 
-        assert_data_arguments(args)
-
         self.image_dataset_name = args.image_dataset_name
         self.image_w_h = args.image_w_h
         self.data_dir = args.data_dir
@@ -101,20 +99,6 @@ class ImageDataset:
     def test_loader(self):
         test_loader = DataLoader(self.test_set, batch_size=self.batch_size, shuffle=True, num_workers=self.num_workers)
         return test_loader
-
-
-def assert_data_arguments(args):
-    valid_dists = ["multinomial", "bernoulli"]
-    assert args.data_distribution in valid_dists, \
-        f"Invalid data distribution: {args.data_distribution}, must be one of: {valid_dists}"
-    assert not (args.image_dataset_name == "bmnist" and args.data_distribution == "multinomial"), \
-        f"If the data set is Binarised MNIST, the data distribution should be set to bernoulli, " \
-        f"currently set to {args.data_distribution}."
-    assert not (args.image_dataset_name in ["fmnist", "mnist"] and args.data_distribution == "bernoulli"), \
-        f"If the data set is MNIST or Fashion MNIST, the data distribution should be set to " \
-        f"multinomial, currently set to {args.data_distribution}."
-    assert not (args.image_dataset_name in ["bminst", "fmnist", "mnist"] and not args.n_channels == 1), \
-        f"{args.image_dataset_name} is a 1-channel dataset."
 
 
 def greater_than_zero(x):

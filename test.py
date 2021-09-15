@@ -10,24 +10,11 @@ def main():
 
     config.image_or_language = "image"
 
-    """
-    parser.add_argument("--objective", default="VAE", type=str,
-                        help="Which objective to use, options:"
-                             "  - VAE"
-                             "  - AE"
-                             "  - BETA-VAE, with beta argument set (Higgins et al., 2016)"
-                             "  - FB-VAE (Kingma et al., 2016)"
-                             "  - MDR-VAE (Pelsmaeker & Aziz, 2019)"
-                             "  - INFO-VAE, with alpha and lambda argument set  (Zhao et al., 2017)"
-                             "  - LAG-INFO-VAE (with ...)  (Zhao et al., 2017)")
-    """
-
-
     counter = 0
-    config.decoder_network_type = "basic_decoder"
+
     # config.q_z_x_type = "conditional_gaussian_made"  # "iaf" #"independent_gaussian" # conditional_gaussian_made
 
-    for objective in ["VAE", "AE", "BETA-VAE", "MDR-VAE"]:
+    for objective in ["VAE", "AE", "BETA-VAE", "MDR-VAE", "INFO-VAE"]:
 
         config.objective = objective
 
@@ -39,32 +26,39 @@ def main():
             dataset = ImageDataset(args=config)
             train_loader = dataset.train_loader()
 
-            for q_z_x_type in ["conditional_gaussian_made", "independent_gaussian"]:
+            for decoder_network_type in ["basic_deconv_decoder", "conditional_made_decoder"]:
+                config.decoder_network_type = decoder_network_type
 
-                config.q_z_x_type = q_z_x_type
+                for q_z_x_type in ["conditional_gaussian_made", "independent_gaussian"]:
 
-                for p_z_type in ["isotropic_gaussian", "mog"]:
-                    config.p_z_type = p_z_type
-                    config.mog_n_components = 3
+                    config.q_z_x_type = q_z_x_type
 
-                    print(f"{counter} | objective: {objective} dataset: {dataset_name.upper()}, data dist {data_dist}, q_z_x_type {q_z_x_type}, p_z_type {p_z_type}")
-                    vae = VaeModel(args=config)
+                    for p_z_type in ["isotropic_gaussian", "mog"]:
+                        config.p_z_type = p_z_type
+                        config.mog_n_components = 3
 
-                    for X, y in train_loader:
-                        print("X input shape", X.shape)
-                        #vae(X)
+                        print(f"{counter} | objective: {objective} dataset: {dataset_name.upper()}, data dist {data_dist}, decoder_network_type: {decoder_network_type}, q_z_x_type {q_z_x_type}, p_z_type {p_z_type}")
+                        if decoder_network_type == "conditional_made_decoder" and data_dist == "multinomial":
+                            print("This combo is not implemented yet.")
+                            continue
 
-                        vae.training_step((X, y), 0)
+                        vae = VaeModel(args=config)
 
-                        break
+                        for X, y in train_loader:
+                            print("X input shape", X.shape)
+                            #vae(X)
 
-                    #sample = vae.gen_model.sample_generative_model(S=10)
-                    #print("Sample.shape", sample.shape)
+                            vae.training_step((X, y), 0)
+
+                            break
+
+                        #sample = vae.gen_model.sample_generative_model(S=10)
+                        #print("Sample.shape", sample.shape)
 
 
-                    print("\n\n")
+                        print("\n\n")
 
-                    counter += 1
+                        counter += 1
 
 if __name__ == "__main__":
     main()

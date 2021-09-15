@@ -4,6 +4,7 @@ from .inference_model import InferenceModel
 from loss_and_optimisation import Objective
 import torch
 
+
 class VaeModel(pl.LightningModule):
     def __init__(self, args):
         super().__init__()

@@ -58,11 +58,11 @@ def prepare_parser(jupyter=False, print_settings=True):
     # ----------------------------------------------------------------------------------------------------------------
     # ARCHITECTURE
     parser.add_argument("--latent_dim", default=32, type=int, help="Dimensionality of the latent space.")
-    parser.add_argument("--decoder_network_type", default="basic_decoder", type=str,
+    parser.add_argument("--decoder_network_type", default="basic_deconv_decoder", type=str,
                         help="Which architecture / distribution structure to use for decoder, options:"
-                             "  - basic_decoder:"
+                             "  - basic_deconv_decoder:"
                              "      p(x|z)"
-                             "  - conditional_decoder:"
+                             "  - conditional_made_decoder:"
                              "      p(x_d|z, x<d)")
     # ----------------------------------------------------------------------------------------------------------------
     # DISTRIBUTION TYPES
@@ -153,9 +153,12 @@ def prepare_parser(jupyter=False, print_settings=True):
 
     args = parser.parse_args()
 
+    check_settings(args)
+
     if print_settings: print_args(args)
 
     return parser.parse_args()
+
 
 def print_args(args):
     print("-" * 71)
@@ -167,3 +170,40 @@ def print_args(args):
 
     print("-" * 70)
     print("-" * 70)
+
+
+def check_valid_option(option, options, setting):
+    assert option in options, f"{option} not a valid option for {setting}, valid options: {options}"
+
+
+def check_settings(args):
+    # DATA DISTRIBUTION / DATA SET CHOICES
+    valid_dists = ["multinomial", "bernoulli"]
+    assert args.data_distribution in valid_dists, \
+        f"Invalid data distribution: {args.data_distribution}, must be one of: {valid_dists}"
+    assert not (args.image_dataset_name == "bmnist" and args.data_distribution == "multinomial"), \
+        f"If the data set is Binarised MNIST, the data distribution should be set to bernoulli, " \
+        f"currently set to {args.data_distribution}."
+    assert not (args.image_dataset_name in ["fmnist", "mnist"] and args.data_distribution == "bernoulli"), \
+        f"If the data set is MNIST or Fashion MNIST, the data distribution should be set to " \
+        f"multinomial, currently set to {args.data_distribution}."
+    assert not (args.image_dataset_name in ["bminst", "fmnist", "mnist"] and not args.n_channels == 1), \
+        f"{args.image_dataset_name} is a 1-channel dataset."
+
+    # Objective
+    objective_options = ["VAE", "AE", "FB-VAE", "MDR-VAE", "INFO-VAE", "LAG-INFO-VAE"]
+    check_valid_option(args.objective, objective_options, "objective")
+
+    # Decoder network types
+    decoder_network_type_options = ["basic_deconv_decoder", "conditional_made_decoder"]
+    check_valid_option(args.decoder_network_type, decoder_network_type_options, "decoder_network_type")
+
+    # Posterior types
+    q_z_x_type_options = ["independent_gaussian", "conditional_gaussian_made", "iaf"]
+    check_valid_option(args.q_z_x_type, q_z_x_type_options, "q_z_x_type")
+
+    # Prior type
+    p_z_type_options = ["isotropic_gaussian", "mog"]
+    check_valid_option(args.p_z_type, p_z_type_options, "p_z_type")
+
+

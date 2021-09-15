@@ -5,7 +5,6 @@ import torch
 import torch.nn as nn
 import torch.distributions as td
 import numpy as np
-from vae_model.inference_model import AutoRegressiveGaussianDistribution
 
 # TODO: total correlation, dimensionwise KL
 # TODO: Free bits KL for Non-Gaussian case
@@ -25,6 +24,8 @@ class Objective(nn.Module):
             self.mdr_optimiser = ConstraintOptimizer(RMSprop, self.mdr_constraint.parameters(), 0.00005)
 
     def compute_loss(self, x_in, q_z_x, z_post, p_z, p_x_z):
+        B = x_in.shape[0]
+
         if self.image_or_language == "image" and self.data_distribution == "multinomial":
             # map 0, 1 range to 0 256 integer range, code taken from:
             # https://github.com/riannevdberg/sylvester-flows/blob/ \
@@ -42,9 +43,12 @@ class Objective(nn.Module):
         # Expected negative log likelihood under q
         # TODO: there might be some kind of masking necessary
 
-        print("XX labels.shape", labels.shape)
+        # print("XX labels.shape", labels.shape)
 
         # Reduce all dimensions with sum, except for the batch dimension, average that
+        if self.args.decoder_network_type == "conditional_made_decoder":
+            # In case of the MADE, the evaluation is in flattened form.
+            labels = labels.reshape(B, -1)
         nll = - p_x_z.log_prob(labels).reshape(self.args.batch_size, -1).mean()
 
         # Maximum mean discrepancy
@@ -63,6 +67,7 @@ class Objective(nn.Module):
         elif self.objective == "FB-VAE":
             raise NotImplementedError
         elif self.objective == "INFO-VAE":
+            # https://github.com/ermongroup/lagvae/blob/master/methods/lagvae.py
             total_loss = - nll + (1 - self.args.info_alpha) * kl_prior_post \
                          + (self.args.info_alpha + self.args.info_lambda - 1) * mmd
         elif self.objective == "LAG-INFO-VAE":
@@ -76,7 +81,6 @@ class Objective(nn.Module):
         )
 
         return loss_dict
-
 
     def kl_prior_post(self, p_z, q_z_x, z_post=None, analytical=False):
         """
