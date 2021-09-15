@@ -21,11 +21,14 @@ class Objective(nn.Module):
 
         # Rate constraint
         if self.objective == "MDR-VAE":
-            self.mdr_constraint = Constraint(args.mdr_value, ">", alpha=0.5)
-            self.mdr_optimiser = ConstraintOptimizer(RMSprop(), self.mdr_constraint.parameters(), 0.00005)
+            self.mdr_constraint = Constraint(args.mdr_value, "ge", alpha=0.5)
+            self.mdr_optimiser = ConstraintOptimizer(RMSprop, self.mdr_constraint.parameters(), 0.00005)
 
     def compute_loss(self, x_in, q_z_x, z_post, p_z, p_x_z):
         if self.image_or_language == "image" and self.data_distribution == "multinomial":
+            # map 0, 1 range to 0 256 integer range, code taken from:
+            # https://github.com/riannevdberg/sylvester-flows/blob/ \
+            # 32dde9b7d696fee94f946a338182e542779eecfe/optimization/loss.py#L74
             num_classes = 256
             labels = (x_in * (num_classes - 1)).long()
         else:
@@ -38,6 +41,8 @@ class Objective(nn.Module):
 
         # Expected negative log likelihood under q
         # TODO: there might be some kind of masking necessary
+
+        print("XX labels.shape", labels.shape)
 
         # Reduce all dimensions with sum, except for the batch dimension, average that
         nll = - p_x_z.log_prob(labels).reshape(self.args.batch_size, -1).mean()
@@ -54,13 +59,14 @@ class Objective(nn.Module):
         elif self.objective == "BETA-VAE":
             total_loss = nll + self.args.beta_beta
         elif self.objective == "MDR-VAE":
-            total_loss = nll + kl_prior_post + self.mdr_constraint(kl_prior_post)
+            total_loss = nll + kl_prior_post + self.mdr_constraint(kl_prior_post).squeeze()
         elif self.objective == "FB-VAE":
-            total_loss = nll + self.free_bits_kl(q_z_x, z_post, free_bits=self.args.free_bits,
-                                                 per_dimension=self.args.free_bits_per_dimension)
+            raise NotImplementedError
         elif self.objective == "INFO-VAE":
             total_loss = - nll + (1 - self.args.info_alpha) * kl_prior_post \
                          + (self.args.info_alpha + self.args.info_lambda - 1) * mmd
+        elif self.objective == "LAG-INFO-VAE":
+            raise NotImplementedError
 
         loss_dict = dict(
             total_loss=total_loss,

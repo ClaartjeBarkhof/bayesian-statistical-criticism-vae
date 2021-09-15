@@ -87,17 +87,18 @@ class GenerativeModel(nn.Module):
         # image: shape
         p_x_z_params = self.decoder_network(z)
 
-        print("p_x_z_params.shape", p_x_z_params.shape)
+        #print("p_x_z_params.shape", p_x_z_params.shape)
 
         if self.p_x_z_type == "bernoulli":
-            # p_x_z_params: [B, 1, W, H] ->
-            p_x_z_params = p_x_z_params.squeeze(1)
+            # p_x_z_params: [B, C, W, H]
+            #print("XX p_x_z_params.shape", p_x_z_params.shape)
             p_x_z = td.Independent(td.Bernoulli(logits=p_x_z_params), 1)
 
         elif self.p_x_z_type == "multinomial":
-            # image: p_x_z_params: [B, num_classes, W, H] -> [B, W, H, num_classes]
-            p_x_z_params = p_x_z_params.permute(0, 2, 3, 1)
-            print("after permute p_x_z_params.shape", p_x_z_params.shape)
+            #print("YY before permute", p_x_z_params.shape)
+            # image: p_x_z_params: [B, C, num_classes, W, H] -> [B, C, W, H, num_classes]
+            p_x_z_params = p_x_z_params.permute(0, 1, 3, 4, 2)
+            #print("XX p_x_z_params.shape", p_x_z_params.shape)
             p_x_z = td.Categorical(logits=p_x_z_params)
 
         else:

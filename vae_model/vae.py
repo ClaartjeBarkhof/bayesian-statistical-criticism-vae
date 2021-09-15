@@ -45,6 +45,10 @@ class VaeModel(pl.LightningModule):
 
         loss_dict = self.objective.compute_loss(x_in, q_z_x, z_post, p_z, p_x_z)
 
+        # for k, v in loss_dict.items():
+        #     print(k, type(v), v)
+        #     print(f"{k}: {v:.2f}")
+
         self.log("train_stats", loss_dict)
 
         return loss_dict["total_loss"]

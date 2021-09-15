@@ -124,4 +124,10 @@ class DecoderGatedConvolutionBlock(nn.Module):
 
         p_x_z_params = self.decoder_gated_cnn_block(z)
 
+        if self.C == 1 and self.data_distribution == "multinomial":
+            p_x_z_params = p_x_z_params.unsqueeze(1)
+        elif self.C == 3:
+            print("Code not checked for 3-channel input, implement something with reshape here.")
+            raise NotImplementedError
+
         return p_x_z_params
