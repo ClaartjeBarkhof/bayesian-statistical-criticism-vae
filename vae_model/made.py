@@ -135,32 +135,6 @@ class MADE(nn.Module):
                 h = self.hidden_activation(t(h) + c(context))
             return self.net[-1](h)  # output layer
 
-    # TODO: multi sample forward?
-    def auto_regressive_sampling(self, q_z_x_params):
-        B = q_z_x_params.shape[0]
-
-        z_sample = torch.zeros((B, self.nin))
-        mu_inferred, scale_inferred = [], []
-
-        for i in range(self.nin):
-            mus_prescales = self.forward(z_sample, context=q_z_x_params)
-            # split in 2 x [B, D]
-            mus_prescales = torch.split(mus_prescales, 2, dim=1)
-            mus, prescales = mus_prescales[0], mus_prescales[1]
-
-            mu_i = mus[:, i]
-            scale_i = F.softplus(prescales[:, i])
-
-            mu_inferred.append(mu_i)
-            scale_inferred.append(scale_i)
-
-            z_sample[:, i] = td.Normal(loc=mu_i, scale=scale_i).rsample()
-
-        mu_inferred = torch.stack(mu_inferred, dim=1)
-        scale_inferred = torch.stack(scale_inferred, dim=1)
-
-        return z_sample, mu_inferred, scale_inferred
-
 
 # ------------------------------------------------------------------------------
 

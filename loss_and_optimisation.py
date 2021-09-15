@@ -34,7 +34,7 @@ class Objective(nn.Module):
 
         # TODO: implement other types of losses
         # Expected KL from prior to posterior
-        kl_prior_post = self.kl_prior_post(p_z=p_z, q_z_x=q_z_x, z_post=z_post, analytical=False)
+        kl_prior_post = self.kl_prior_post(p_z=p_z, q_z_x=q_z_x, z_post=z_post, analytical=True)
 
         # Expected negative log likelihood under q
         # TODO: there might be some kind of masking necessary
@@ -71,6 +71,7 @@ class Objective(nn.Module):
 
         return loss_dict
 
+
     def kl_prior_post(self, p_z, q_z_x, z_post=None, analytical=False):
         """
         Computes the KL from prior to posterior, either analytically or empirically,
@@ -80,62 +81,22 @@ class Objective(nn.Module):
         Returns:
         """
 
-        if analytical:
-            # TODO: this is not possible for all
-            # [B] (summed over latent dimension)
-            if isinstance(q_z_x, AutoRegressiveGaussianDistribution):
-                scale = q_z_x.logvars_inferred.mul(0.5).exp_()
-                q_z_x_dist = td.Independent(td.Normal(loc=q_z_x.mus_inferred, scale=scale), 1)
-            else:
-                q_z_x_dist = q_z_x
+        # A bit of a hack to avoid this kl that raises a NotImplementedError
+        if isinstance(p_z, td.MixtureSameFamily):
+            analytical = False
 
-            kl = kl_divergence(q_z_x_dist, p_z).mean()
+        if analytical:
+
+            kl = kl_divergence(q_z_x, p_z).mean()
 
         else:
-            # [1, B]
+            # [B]
             log_q_z_x = q_z_x.log_prob(z_post)
             log_p_z = p_z.log_prob(z_post)
 
             kl = (log_q_z_x - log_p_z).mean()
+
         return kl
-
-    @staticmethod
-    def free_bits_kl(q_z_x, z_post, free_bits=0.0, per_dimension=True):
-        """
-        Calculates the KL-divergence between the posterior and the prior analytically.
-        """
-
-        # [B, D]
-        mus = q_z_x.loc
-        # [B, D, D] -> [B, D] (we assume independent dimensions)
-        logvar = torch.log(q_z_x.covariance_matrix.diagonal(dim1=-1))  # TODO: check this
-
-        kl_loss = 0.5 * (mus.pow(2) + logvar.exp() - logvar - 1)
-        free_bits_kl_loss = None
-
-        if free_bits > 0.0 and per_dimension:
-
-            # Ignore the dimensions of which the KL-div is already under the
-            # threshold, avoiding driving it down even further. Those values do
-            # not have to be replaced by the threshold because that would not mean
-            # anything to the gradient. That's why they are simply removed. This
-            # confused me at first.
-            kl_mask = (kl_loss > free_bits).float()
-
-            # Sum over the latent dimensions and average over the batch dimension
-            free_bits_kl_loss = (kl_mask * kl_loss).sum(-1).mean(0)
-
-        elif free_bits > 0.0 and not per_dimension:
-            # Reduce latent dimensions [B, D] -> [B]
-            kl_loss_red = kl_loss.sum(-1)
-
-            # Mask
-            kl_mask = (kl_loss_red > free_bits).float()
-            free_bits_kl_loss = (kl_mask * kl_loss_red).mean(0)
-
-        kl_loss = kl_loss.sum(-1).mean(0)
-
-        return kl_loss, free_bits_kl_loss
 
     @staticmethod
     def gaussian_kernel(x, y):

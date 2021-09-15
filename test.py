@@ -36,7 +36,10 @@ def main():
 
                 for X, y in train_loader:
                     print("X input shape", X.shape)
-                    vae(X)
+                    #vae(X)
+
+                    vae.training_step((X, y), 0)
+
                     break
 
                 sample = vae.gen_model.sample_generative_model(S=10)
