@@ -46,7 +46,8 @@ class GenerativeModel(nn.Module):
     def sample_generative_model(self, S=1):
         z_prior = self.sample_prior(S=S)
         p_x_z_prior = self.p_x_z(z_prior)
-        return p_x_z_prior
+        sample = p_x_z_prior.sample()
+        return sample
 
     def forward(self, z_post, x_in=None):
         """
@@ -82,12 +83,21 @@ class GenerativeModel(nn.Module):
         return z_prior
 
     def p_x_z(self, z, x=None):
+
+        # image: shape
         p_x_z_params = self.decoder_network(z)
 
+        print("p_x_z_params.shape", p_x_z_params.shape)
+
         if self.p_x_z_type == "bernoulli":
+            # p_x_z_params: [B, 1, W, H] ->
+            p_x_z_params = p_x_z_params.squeeze(1)
             p_x_z = td.Independent(td.Bernoulli(logits=p_x_z_params), 1)
 
         elif self.p_x_z_type == "multinomial":
+            # image: p_x_z_params: [B, num_classes, W, H] -> [B, W, H, num_classes]
+            p_x_z_params = p_x_z_params.permute(0, 2, 3, 1)
+            print("after permute p_x_z_params.shape", p_x_z_params.shape)
             p_x_z = td.Categorical(logits=p_x_z_params)
 
         else:

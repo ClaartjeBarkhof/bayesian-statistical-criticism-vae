@@ -110,7 +110,7 @@ def prepare_parser(jupyter=False, print_settings=True):
                         help="The name of the dataset, 'cnn_dailymail' by default, else: ptb_text_only.")
     parser.add_argument("--vocab_size", default=50265, type=int,
                         help="Size of the vocabulary size of the tokenizer used.") # 50265 = roberta vocab size
-    parser.add_argument("--num_workers", default=6, type=int,
+    parser.add_argument("--num_workers", default=0, type=int,
                         help="Num workers for data loading.")
     parser.add_argument("--max_seq_len", default=64, type=int,
                         help="What the maximum sequence length the model accepts is (default: 128).")

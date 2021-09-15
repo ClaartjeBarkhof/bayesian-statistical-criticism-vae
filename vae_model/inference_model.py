@@ -57,7 +57,9 @@ class InferenceModel(nn.Module):
         """Infers a distribution from encoding the input x_in."""
         # [B, 256]
         q_z_x_params = self.q_z_nn(x_in)
+        print("infer_q_z_x q_z_x_params", q_z_x_params.shape)
         q_z_x = self.q_z_x_block(q_z_x_params)
+        print("infer_q_z_x q_z_x", q_z_x)
 
         return q_z_x
 
