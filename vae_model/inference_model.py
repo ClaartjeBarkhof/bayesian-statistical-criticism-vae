@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.distributions as td
 
 from vae_model.made import MADE
@@ -79,14 +80,13 @@ class IndependentGaussianBlock(nn.Module):
         self.D = args.latent_dim
 
         self.mean_layer = nn.Linear(256, self.D)
-        self.logvar_layer = nn.Linear(256, self.D)
+        self.scale_layer = nn.Sequential(nn.Linear(256, self.D), nn.Softplus())
 
 
     def forward(self, q_z_x_params):
 
         mean = self.mean_layer(q_z_x_params)
-        logvar = self.logvar_layer(q_z_x_params)
-        scale = logvar.mul(0.5).exp_()
+        scale = self.scale_layer(q_z_x_params)
 
         # [B, D] (D independent Gaussians)
         q_z_x = td.Independent(td.Normal(loc=mean, scale=scale), 1)
@@ -95,33 +95,32 @@ class IndependentGaussianBlock(nn.Module):
 
 
 class AutoRegressiveGaussianDistribution(nn.Module):
-    def __init__(self, z_sample, made_block=None, mus_inferred=None, logvars_inferred=None):
+    def __init__(self, z_sample, made_block=None, mu_inferred=None, scale_inferred=None):
         super(AutoRegressiveGaussianDistribution, self).__init__()
 
         self.z_sample = z_sample
 
-        assert made_block is not None or (mus_inferred is not None and logvars_inferred is not None), \
-            "Either give a MADE as input or the inferred mus and logvars"
+        assert made_block is not None or (mu_inferred is not None and scale_inferred is not None), \
+            "Either give a MADE as input or the inferred mus and scales"
 
         self.made_block = made_block # ConditionalGaussianBlockMADE: careful this is more than the MADE itself
-        self.mus_inferred = mus_inferred
-        self.logvars_inferred = logvars_inferred
+        self.mu_inferred = mu_inferred
+        self.scale_inferred = scale_inferred
 
     def log_prob(self, z):
-        if self.mus_inferred is None or self.logvars_inferred is None:
+        if self.mu_inferred is None or self.scale_inferred is None:
             output_made = self.made_block(z)
             params_split = torch.split(output_made, 2, dim=1)
-            mean, logvar = params_split[0], params_split[1]
+            mean, pre_scale = params_split[0], params_split[1]
+            scale = F.softplus(pre_scale)
         else:
-            mean, logvar = self.mus_inferred, self.logvars_inferred
+            mean, scale = self.mus_inferred, self.scale_inferred
 
-        scale = logvar.mul(0.5).exp_()
         log_q_z_x = td.Independent(td.Normal(loc=mean, scale=scale), 1).log_prob(z)
         return log_q_z_x
 
     def rsample(self):
         return self.z_sample
-
 
 class ConditionalGaussianBlockMADE(nn.Module):
     def __init__(self, args):
@@ -142,11 +141,11 @@ class ConditionalGaussianBlockMADE(nn.Module):
         #made_initial_input = self.mapping_layer(q_z_x_params)
 
         # All [B, D]
-        z_sample, mus_inferred, logvars_inferred = self.made_block.auto_regressive_sampling(q_z_x_params)
+        z_sample, mu_inferred, scale_inferred = self.made_block.auto_regressive_sampling(q_z_x_params)
 
         # Placeholder distribution object
-        q_z_x = AutoRegressiveGaussianDistribution(z_sample=z_sample, mus_inferred=mus_inferred,
-                                                   logvars_inferred=logvars_inferred)
+        q_z_x = AutoRegressiveGaussianDistribution(z_sample=z_sample, mu_inferred=mu_inferred,
+                                                   scale_inferred=scale_inferred)
 
         return q_z_x
 

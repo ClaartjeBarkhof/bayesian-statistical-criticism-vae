@@ -140,23 +140,26 @@ class MADE(nn.Module):
         B = q_z_x_params.shape[0]
 
         z_sample = torch.zeros((B, self.nin))
-        print("z_sample.shape", z_sample.shape)
-        mus_inferred, logvars_inferred = [], []
+        mu_inferred, scale_inferred = [], []
 
         for i in range(self.nin):
-            mus_logvars = self.forward(z_sample, context=q_z_x_params)
+            mus_prescales = self.forward(z_sample, context=q_z_x_params)
             # split in 2 x [B, D]
-            mus_logvars = torch.split(mus_logvars, 2, dim=1)
-            mus, logvars = mus_logvars[0], mus_logvars[1]
-            mus_inferred.append(mus[:, i])
-            logvars_inferred.append(logvars[:, i])
-            std_i = logvars[:, i].mul(0.5).exp_()
-            z_sample[:, i] = td.Normal(loc=mus[:, i], scale=std_i).rsample()
+            mus_prescales = torch.split(mus_prescales, 2, dim=1)
+            mus, prescales = mus_prescales[0], mus_prescales[1]
 
-        mus_inferred = torch.stack(mus_inferred, dim=1)
-        logvars_inferred = torch.stack(logvars_inferred, dim=1)
+            mu_i = mus[:, i]
+            scale_i = F.softplus(prescales[:, i])
 
-        return z_sample, mus_inferred, logvars_inferred
+            mu_inferred.append(mu_i)
+            scale_inferred.append(scale_i)
+
+            z_sample[:, i] = td.Normal(loc=mu_i, scale=scale_i).rsample()
+
+        mu_inferred = torch.stack(mu_inferred, dim=1)
+        scale_inferred = torch.stack(scale_inferred, dim=1)
+
+        return z_sample, mu_inferred, scale_inferred
 
 
 # ------------------------------------------------------------------------------

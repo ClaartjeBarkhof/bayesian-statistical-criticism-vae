@@ -28,7 +28,6 @@ class VaeModel(pl.LightningModule):
         # [B, D]
         q_z_x, z_post = self.inf_model(x_in=x_in)
 
-
         # Make predictions / generate based on the inferred latent
         # Language: Categorical of [B, L]
         # Image: Bernoulli or Gaussian of [W, H]
