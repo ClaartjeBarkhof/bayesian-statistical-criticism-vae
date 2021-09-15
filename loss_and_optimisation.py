@@ -1,15 +1,23 @@
-from lagrangian_opt.constraint import Constraint, ConstraintOptimizer
 from torch.distributions import kl_divergence
 from torch.optim import RMSprop
 import torch
 import torch.nn as nn
 import torch.distributions as td
-import numpy as np
 
-# TODO: total correlation, dimensionwise KL
-# TODO: Free bits KL for Non-Gaussian case
 
 class Objective(nn.Module):
+    """
+    This class handles the objective we choose to optimise our deep generative latent variable model with.
+
+    It handles the following objectives:
+      - VAE
+      - AE
+      - BETA-VAE, with beta argument set (Higgins et al., 2016)
+      - FB-VAE (Kingma et al., 2016)
+      - MDR-VAE (Pelsmaeker & Aziz, 2019)
+      - INFO-VAE, with alpha and lambda argument set  (Zhao et al., 2017)
+      - LAG-INFO-VAE (Zhao et al., 2017)
+    """
     def __init__(self, args):
         super(Objective, self).__init__()
 
@@ -18,12 +26,29 @@ class Objective(nn.Module):
         self.image_or_language = args.image_or_language
         self.args = args
 
-        # Rate constraint
-        if self.objective == "MDR-VAE":
-            self.mdr_constraint = Constraint(args.mdr_value, "ge", alpha=0.5)
-            self.mdr_optimiser = ConstraintOptimizer(RMSprop, self.mdr_constraint.parameters(), 0.00005)
+
 
     def compute_loss(self, x_in, q_z_x, z_post, p_z, p_x_z):
+        """
+        This function computes statistics and assembles the loss for which we optimise
+        based on which objective is used.
+
+        Args:
+            x_in: [B, C, W, H] (image) or [B, L] (language)
+                the input batch (language sequences or images)
+            q_z_x:
+                a posterior distribution(-like) object
+            z_post: [B, D]
+                batch of posterior samples
+            p_z:
+                a prior distribution object
+            p_x_z:
+                a likelihood distribution(-like) object
+        Returns:
+            loss_dict:
+                a dictionary containing statistics to log and 'total_loss' which is used for optimisation
+        """
+
         B = x_in.shape[0]
 
         if self.image_or_language == "image" and self.data_distribution == "multinomial":
@@ -63,7 +88,10 @@ class Objective(nn.Module):
         elif self.objective == "BETA-VAE":
             total_loss = nll + self.args.beta_beta
         elif self.objective == "MDR-VAE":
-            total_loss = nll + kl_prior_post + self.mdr_constraint(kl_prior_post).squeeze()
+            # the gradients for the constraints are recorded at some other point
+            with torch.no_grad():
+                mdr_loss = self.mdr_constraint(kl_prior_post).squeeze()
+            total_loss = nll + kl_prior_post + mdr_loss
         elif self.objective == "FB-VAE":
             raise NotImplementedError
         elif self.objective == "INFO-VAE":
@@ -82,14 +110,9 @@ class Objective(nn.Module):
 
         return loss_dict
 
-    def kl_prior_post(self, p_z, q_z_x, z_post=None, analytical=False):
-        """
-        Computes the KL from prior to posterior, either analytically or empirically,
-        depending on whether the posterior distribution is given.
-
-        Args:
-        Returns:
-        """
+    @staticmethod
+    def kl_prior_post(p_z, q_z_x, z_post=None, analytical=False):
+        """Computes the KL from prior to posterior, either analytically or empirically."""
 
         # A bit of a hack to avoid this kl that raises a NotImplementedError
         if isinstance(p_z, td.MixtureSameFamily):

@@ -3,6 +3,7 @@ from .generative_model import GenerativeModel
 from .inference_model import InferenceModel
 from loss_and_optimisation import Objective
 import torch
+from lagrangian_opt.constraint import Constraint, ConstraintOptimizer
 
 
 class VaeModel(pl.LightningModule):
@@ -24,6 +25,17 @@ class VaeModel(pl.LightningModule):
         # Objective
         self.objective = Objective(args=args)
 
+        # For the rate constraint
+        self.mdr_constraint = self.get_mdr_constraint()
+        self.mdr_loss = None
+        # TODO: self.lag_vae_constraint = ...
+
+    def get_mdr_constraint(self):
+        if self.objective == "MDR-VAE":
+            return Constraint(self.args.mdr_value, "ge", alpha=0.5)
+        else:
+            return None
+
     def forward(self, x_in):
         # Infer the approximate posterior q(z|x) and sample from it to obtain z_post
         # [B, D]
@@ -39,21 +51,37 @@ class VaeModel(pl.LightningModule):
 
         return q_z_x, z_post, p_z, p_x_z
 
-    def training_step(self, x_in_labels_in, batch_idx):
-        x_in, labels_in = x_in_labels_in[0], x_in_labels_in[1]  # TODO: no use for labels_in
+    def shared_step(self, batch):
+        x_in, labels = batch[0], batch[1]
 
         q_z_x, z_post, p_z, p_x_z = self.forward(x_in)
 
         loss_dict = self.objective.compute_loss(x_in, q_z_x, z_post, p_z, p_x_z)
 
-        # for k, v in loss_dict.items():
-        #     print(k, type(v), v)
-        #     print(f"{k}: {v:.2f}")
+        return loss_dict
 
-        self.log("train_stats", loss_dict)
+    def training_step(self, batch, batch_idx, optimizer_idx=None):
+        if optimizer_idx == 0 or optimizer_idx is None:
+            loss_dict = self.shared_step(batch)
 
-        return loss_dict["total_loss"]
+            self.log("train_stats", loss_dict)
+
+            return loss_dict["total_loss"]
+
+        elif optimizer_idx == 1:
+            if self.objective == "MDR-VAE":
+                # do constraint forward
+                constraint_loss = self.mdr_constraint
+
+    def validation_step(self, batch, batch_idx):
+        loss_dict = self.shared_step(batch)
+
+        self.log("valid_stats", loss_dict)
 
     def configure_optimizers(self):
-        optimiser = torch.optim.AdamW(self.parameters(), lr=self.args.lr)
-        return optimiser
+        # examples for multiple optimisers
+
+        vae_optimiser = torch.optim.AdamW(self.parameters(), lr=self.args.lr)
+
+        #return (vae_optimiser, torch.optim.AdamW(self.parameters(), lr=self.args.lr))
+        return vae_optimiser

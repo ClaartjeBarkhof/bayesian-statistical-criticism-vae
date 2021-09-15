@@ -1,4 +1,4 @@
-from arguments import preprare_parser
+from arguments import prepare_parser
 from dataset_dataloader import ImageDataset # LanguageDataset
 from vae_model.vae import VaeModel
 import pytorch_lightning as pl
@@ -17,7 +17,7 @@ def get_data_loaders(args):
 
 
 def main():
-    args = preprare_parser(print_settings=True)
+    args = prepare_parser(print_settings=True)
 
     data_loaders = get_data_loaders(args)
 
