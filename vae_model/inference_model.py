@@ -67,9 +67,10 @@ class InferenceModel(nn.Module):
     def forward(self, x_in, n_samples=1):
         """Infers a distribution and samples from it with the reparameterisation trick."""
         # [S, B, D]
+        print("inference forward x_in", type(x_in), x_in.shape)
         q_z_x = self.infer_q_z_x(x_in)
         z_post = q_z_x.rsample()  # TODO: sample_shape=(n_samples,)
-
+        print("inference forward q_z_x, z_post.shape", q_z_x, z_post.shape)
         return q_z_x, z_post
 
 

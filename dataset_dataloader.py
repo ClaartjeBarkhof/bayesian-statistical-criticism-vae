@@ -92,12 +92,12 @@ class ImageDataset:
         return train_loader
 
     def valid_loader(self):
-        valid_loader = DataLoader(self.valid_set, batch_size=self.batch_size, shuffle=True,
+        valid_loader = DataLoader(self.valid_set, batch_size=self.batch_size, shuffle=False,
                                   num_workers=self.num_workers)
         return valid_loader
 
     def test_loader(self):
-        test_loader = DataLoader(self.test_set, batch_size=self.batch_size, shuffle=True, num_workers=self.num_workers)
+        test_loader = DataLoader(self.test_set, batch_size=self.batch_size, shuffle=False, num_workers=self.num_workers)
         return test_loader
 
 

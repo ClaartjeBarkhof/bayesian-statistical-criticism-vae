@@ -77,7 +77,7 @@ class Objective(nn.Module):
         # z_post at this point is [1, B, D]
         mmd = self.maximum_mean_discrepancy(z_post.squeeze(0))
 
-        total_loss = None
+        total_loss, mdr_loss = None, None
         if self.objective == "AE":
             total_loss = nll
         elif self.objective == "VAE":
@@ -86,13 +86,11 @@ class Objective(nn.Module):
             total_loss = nll + self.args.beta_beta
         elif self.objective == "MDR-VAE":
             # the gradients for the constraints are recorded at some other point
-            with torch.no_grad():
-                mdr_loss = self.mdr_constraint(kl_prior_post).squeeze()
+            mdr_loss = self.mdr_constraint(kl_prior_post).squeeze()
             total_loss = nll + kl_prior_post + mdr_loss
         elif self.objective == "FB-VAE":
             raise NotImplementedError
         elif self.objective == "INFO-VAE":
-            # TODO: check this objective
             # gain = ll - (1 - a)*kl_prior_post - (a + l - 1)*marg_kl
             # loss = nll + (1 - a)*kl_prior_post + (a + l - 1)*marg_kl
             total_loss = nll + ((1 - self.args.info_alpha) * kl_prior_post) \
@@ -103,9 +101,10 @@ class Objective(nn.Module):
 
         loss_dict = dict(
             total_loss=total_loss,
-            mmd=mmd.item(),
-            nll=nll.item(),
-            kl_prior_post=kl_prior_post.item()
+            mmd=mmd,
+            mdr_loss=mdr_loss,
+            nll=nll,
+            kl_prior_post=kl_prior_post
         )
 
         return loss_dict

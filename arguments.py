@@ -1,7 +1,7 @@
 import distutils
 import configargparse
 import sys
-
+import os
 
 def prepare_parser(jupyter=False, print_settings=True):
     parser = configargparse.ArgParser()
@@ -32,6 +32,8 @@ def prepare_parser(jupyter=False, print_settings=True):
     # MDR-VAE
     parser.add_argument("--mdr_value", default=16.0, type=float,
                         help="The Minimum Desired Rate value (> constraint on rate).")
+    parser.add_argument("--mdr_constraint_optim_lr", default=0.001, type=float,
+                        help="The learning rate for the MDR constraint optimiser.")
 
     # INFO-VAE
     parser.add_argument("--info_alpha", default=1.0, type=float,
@@ -43,17 +45,17 @@ def prepare_parser(jupyter=False, print_settings=True):
     # BATCHES / TRAIN STEPS
     parser.add_argument("--batch_size", default=32, type=int,
                         help="Batch size for data loading and training.")
-    parser.add_argument("--max_global_train_steps", default=1e6, type=int,
+    parser.add_argument("--max_steps", default=1e6, type=int,
                         help="Maximum number of train steps in total.")
-    parser.add_argument("--max_epochs", default=100, type=int,
+    parser.add_argument("--max_epochs", default=10, type=int,
                         help="Maximum number of epochs, if -1 no maximum number of epochs is set.")
 
     # ----------------------------------------------------------------------------------------------------------------
     # LEARNING RATE
-    parser.add_argument("--lr", default=0.00005, type=float,
-                        help="Learning rate (default: 0.00002).")
-    parser.add_argument("--lr_scheduler", default=False, type=lambda x: bool(distutils.util.strtobool(x)),
-                        help="Whether or not to use a lr scheduler (default: True).")
+    parser.add_argument("--lr", default=0.00002, type=float,
+                        help="Learning rate.")
+    # TODO: parser.add_argument("--lr_scheduler", default=False, type=lambda x: bool(distutils.util.strtobool(x)),
+    #                     help="Whether or not to use a lr scheduler (default: True).")
 
     # ----------------------------------------------------------------------------------------------------------------
     # ARCHITECTURE
@@ -66,29 +68,30 @@ def prepare_parser(jupyter=False, print_settings=True):
                              "      p(x_d|z, x<d)")
     # ----------------------------------------------------------------------------------------------------------------
     # DISTRIBUTION TYPES
-    # independent_gaussian, ...
+    # independent_gaussian", conditional_gaussian_made, iaf
     parser.add_argument("--q_z_x_type", default="independent_gaussian", type=str,
                         help="Which type of posterior distribution to use, options:"
                              "  - independent_gaussian"
-                             "  - ...")
+                             "  - conditional_gaussian_made"
+                             "  - iaf")
     # isotropic_gaussian, ...
     parser.add_argument("--p_z_type", default="isotropic_gaussian", type=str,
                         help="Which type of prior distribution to use, options:"
                              "  - isotropic_gaussian"
                              "  - mog")
-    parser.add_argument("--mog_n_components", default=20, type=int,
+    parser.add_argument("--mog_n_components", default=10, type=int,
                         help="If using Mixture of Gaussians as prior, "
                              "this parameter sets the number of learned components.")
-    # p_x_z_type: [bernoulli, gaussian, categorical]
+    # p_x_z_type: [bernoulli, gaussian, multinomial]
     parser.add_argument("--p_x_z_type", default="bernoulli", type=str,
                         help="Which type of predictive p_x_z distribution to use, options:"
                              "  - bernoulli"
                              "  - gaussian"
-                             "  - categorical")
+                             "  - multinomial")
 
     # ----------------------------------------------------------------------------------------------------------------
     # GENERAL DATASET ARGUMENTS
-    parser.add_argument("--data_dir", default='data', type=str, help="The name of the data directory.")
+    parser.add_argument("--data_dir", default=get_code_dir()+'/data', type=str, help="The name of the data directory.")
     parser.add_argument("--image_or_language", default='image', type=str,
                         help="The type of the dataset, options: 'image' or 'language'.")
     parser.add_argument("--data_distribution", default='bernoulli', type=str,
@@ -137,14 +140,19 @@ def prepare_parser(jupyter=False, print_settings=True):
 
     # ----------------------------------------------------------------------------------------------------------------
     # DISTRIBUTED TRAINING
-    parser.add_argument("--n_gpus", default=1, type=int,
+    parser.add_argument("--gpus", default=0, type=int,
                         help="Number GPUs to use (default: None).")
     parser.add_argument("--ddp", default=False, type=lambda x: bool(distutils.util.strtobool(x)),
                         help="Whether or not to use Distributed Data Parallel (DDP) "
                              "(default: True if n_gpus > 1, else: False).")
 
     # ----------------------------------------------------------------------------------------------------------------
-    # PARSE & PRINT & RETURN
+    # GENERAL
+    parser.add_argument("--code_dir", default=get_code_dir(), type=str,
+                        help="The name of the code dir, depending on LISA or local.")
+    parser.add_argument("--fast_dev_run", default=False, type=lambda x: bool(distutils.util.strtobool(x)),
+                        help="Whether or not to perform a fast_dev_run.")
+
 
     # TODO: add seed & deterministic
 
@@ -175,6 +183,10 @@ def print_args(args):
 def check_valid_option(option, options, setting):
     assert option in options, f"{option} not a valid option for {setting}, valid options: {options}"
 
+def get_code_dir():
+
+    return os.path.dirname(os.path.realpath(__file__))
+
 
 def check_settings(args):
     # DATA DISTRIBUTION / DATA SET CHOICES
@@ -194,6 +206,9 @@ def check_settings(args):
     objective_options = ["VAE", "AE", "FB-VAE", "MDR-VAE", "INFO-VAE", "LAG-INFO-VAE"]
     check_valid_option(args.objective, objective_options, "objective")
 
+    if args.objective == "LAG-VAE" or args.objective == "LAG-INFO-VAE":
+        raise NotImplementedError
+
     # Decoder network types
     decoder_network_type_options = ["basic_deconv_decoder", "conditional_made_decoder"]
     check_valid_option(args.decoder_network_type, decoder_network_type_options, "decoder_network_type")
@@ -202,8 +217,19 @@ def check_settings(args):
     q_z_x_type_options = ["independent_gaussian", "conditional_gaussian_made", "iaf"]
     check_valid_option(args.q_z_x_type, q_z_x_type_options, "q_z_x_type")
 
+    if args.q_z_x_type == "iaf":
+        raise NotImplementedError
+
     # Prior type
     p_z_type_options = ["isotropic_gaussian", "mog"]
     check_valid_option(args.p_z_type, p_z_type_options, "p_z_type")
 
+    p_x_z_type_options = ["bernoulli", "multinomial"]
+    check_valid_option(args.p_x_z_type, p_x_z_type_options, "p_x_z_type")
 
+    if args.decoder_network_type == "conditional_made_decoder" and not (args.p_x_z_type == "bernoulli"):
+        raise NotImplementedError
+
+
+if __name__ == "__main__":
+    config = prepare_parser(jupyter=False, print_settings=True)

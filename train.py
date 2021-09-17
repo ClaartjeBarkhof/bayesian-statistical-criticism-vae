@@ -2,10 +2,13 @@ from arguments import prepare_parser
 from dataset_dataloader import ImageDataset # LanguageDataset
 from vae_model.vae import VaeModel
 import pytorch_lightning as pl
+from pytorch_lightning.loggers import WandbLogger
+from pytorch_lightning.callbacks import ModelCheckpoint
 
 
 def get_data_loaders(args):
     dataset = None
+
     if args.image_or_language == "image":
         dataset = ImageDataset(args)
     # TODO: else:
@@ -15,6 +18,13 @@ def get_data_loaders(args):
 
     return loaders
 
+def make_run_name(args):
+    if args.image_or_language == "image":
+        name = f"{args.objective} | {args.image_dataset_name.upper()} ({args.data_distribution}) | Q_Z_X: {args.q_z_x_type} " \
+        f"P_Z: {args.p_z_type} P_X_Z: {args.p_x_z_type} DECODER-TYPE: {args.decoder_network_type}"
+        return name
+    else:
+        raise NotImplementedError
 
 def main():
     args = prepare_parser(print_settings=True)
@@ -32,10 +42,27 @@ def main():
     # # call tune to find the lr
     # trainer.tune(model)
 
+    if args.logging:
+        logger = WandbLogger(project=args.wandb_project, name=make_run_name(args))
+        logger.log_hyperparams(args)
+        logger.watch(vae_model)
+    else:
+        logger = False
+
+    if args.checkpoint:
+        checkpoint_callback = ModelCheckpoint(monitor="val_loss")
+
     trainer = pl.Trainer(accelerator="ddp" if args.ddp else None,
+                         gpus=args.gpus,
+                         automatic_optimization=False,
                          benchmark=True,
                          deterministic=True,
-                         )
+                         logger=logger,
+                         log_gpu_memory="all",
+                         log_every_n_steps=args.log_every_n_steps,
+                         max_steps=args.max_steps,
+                         max_epochs=args.max_epochs,
+                         fast_dev_run=4 if args.fast_dev_run else False)
 
     trainer.fit(vae_model, data_loaders["train"], data_loaders["valid"])
 

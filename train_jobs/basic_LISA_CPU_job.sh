@@ -17,4 +17,4 @@ source $CONDA_PREFIX/etc/profile.d/conda.sh
 conda deactivate # just to make sure other envs are not active
 conda activate thesisenv # activate environment
 
-python /home/cbarkhof/fall-2021/train.py --gpus=0
+python /home/cbarkhof/fall-2021/train.py --gpus=0 --logging=False --fast_dev_run=True
