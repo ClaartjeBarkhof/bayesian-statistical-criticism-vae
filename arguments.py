@@ -167,6 +167,8 @@ def prepare_parser(jupyter=False, print_settings=True):
 
     check_settings(args)
 
+
+
     if print_settings: print_args(args)
 
     return args

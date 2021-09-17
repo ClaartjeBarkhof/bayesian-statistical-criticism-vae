@@ -10,3 +10,6 @@
 [submodule "sylvester-flows"]
 	path = sylvester-flows
 	url = https://github.com/riannevdberg/sylvester-flows.git
+[submodule "torch-two-sample"]
+	path = torch-two-sample
+	url = https://github.com/josipd/torch-two-sample.git

@@ -5,7 +5,6 @@ import torch.distributions as td
 from lagrangian_opt.constraint import Constraint
 from torch_two_sample import MMDStatistic
 
-
 class Objective(nn.Module):
     """
     This class handles the objective we choose to optimise our deep generative latent variable model with.
@@ -140,9 +139,8 @@ class Objective(nn.Module):
         return kl
 
     def maximum_mean_discrepancy(self, z_post):
-        z_post = z_post.squeeze(1)
         prior_sample = torch.randn(z_post.shape).to(z_post.device)
-        alphas = [0.1 * i for i in range(5)]
+        alphas = [0.1 * i for i in range(5)] # TODO: no clue for these...
 
         n_1, n_2 = len(z_post), len(prior_sample)
         MMD_stat = MMDStatistic(n_1, n_2)
