@@ -135,3 +135,4 @@ dmypy.json
 check_dataset_dataloader.ipynb
 check_inference_model.ipynb
 /lightning_logs/
+/train_jobs/

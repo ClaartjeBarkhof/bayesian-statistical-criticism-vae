@@ -18,15 +18,14 @@ class Objective(nn.Module):
       - INFO-VAE, with alpha and lambda argument set  (Zhao et al., 2017)
       - LAG-INFO-VAE (Zhao et al., 2017)
     """
-    def __init__(self, args):
+    def __init__(self, args, mdr_constraint=None):
         super(Objective, self).__init__()
 
         self.objective = args.objective
         self.data_distribution = args.data_distribution
         self.image_or_language = args.image_or_language
         self.args = args
-
-
+        self.mdr_constraint = mdr_constraint
 
     def compute_loss(self, x_in, q_z_x, z_post, p_z, p_x_z):
         """
@@ -61,19 +60,17 @@ class Objective(nn.Module):
             # TODO: for language should be something along the lines of x[:, 1:] (cutting of the start token)
             labels = x_in
 
-        # TODO: implement other types of losses
         # Expected KL from prior to posterior
         kl_prior_post = self.kl_prior_post(p_z=p_z, q_z_x=q_z_x, z_post=z_post, analytical=True)
 
         # Expected negative log likelihood under q
         # TODO: there might be some kind of masking necessary
 
-        # print("XX labels.shape", labels.shape)
-
         # Reduce all dimensions with sum, except for the batch dimension, average that
         if self.args.decoder_network_type == "conditional_made_decoder":
             # In case of the MADE, the evaluation is in flattened form.
             labels = labels.reshape(B, -1)
+
         nll = - p_x_z.log_prob(labels).reshape(self.args.batch_size, -1).mean()
 
         # Maximum mean discrepancy
@@ -95,10 +92,13 @@ class Objective(nn.Module):
         elif self.objective == "FB-VAE":
             raise NotImplementedError
         elif self.objective == "INFO-VAE":
-            # https://github.com/ermongroup/lagvae/blob/master/methods/lagvae.py
-            total_loss = - nll + (1 - self.args.info_alpha) * kl_prior_post \
-                         + (self.args.info_alpha + self.args.info_lambda - 1) * mmd
+            # TODO: check this objective
+            # gain = ll - (1 - a)*kl_prior_post - (a + l - 1)*marg_kl
+            # loss = nll + (1 - a)*kl_prior_post + (a + l - 1)*marg_kl
+            total_loss = nll + ((1 - self.args.info_alpha) * kl_prior_post) \
+                         + ((self.args.info_alpha + self.args.info_lambda - 1) * mmd)
         elif self.objective == "LAG-INFO-VAE":
+            # https://github.com/ermongroup/lagvae/blob/master/methods/lagvae.py
             raise NotImplementedError
 
         loss_dict = dict(
@@ -114,7 +114,7 @@ class Objective(nn.Module):
     def kl_prior_post(p_z, q_z_x, z_post=None, analytical=False):
         """Computes the KL from prior to posterior, either analytically or empirically."""
 
-        # A bit of a hack to avoid this kl that raises a NotImplementedError
+        # A bit of a hack to avoid this kl that raises a NotImplementedError (TODO: make this possible)
         if isinstance(p_z, td.MixtureSameFamily):
             analytical = False
 
