@@ -60,7 +60,7 @@ class AutoRegressiveDistribution(nn.Module):
 
         B = self.context.shape[0]
 
-        z_sample = torch.zeros((B, self.x_z_dim))
+        z_sample = torch.zeros((B, self.x_z_dim), device=self.context.device)
         mu_inferred, scale_inferred = [], []
 
         for i in range(self.x_z_dim):

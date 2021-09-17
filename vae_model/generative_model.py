@@ -7,9 +7,12 @@ from vae_model.distributions import AutoRegressiveDistribution
 from vae_model.made import MADE
 
 class GenerativeModel(nn.Module):
-    def __init__(self, args):
+    def __init__(self, args, device="cpu"):
         super(GenerativeModel, self).__init__()
 
+        print("Generative model device", device)
+
+        self.device = device
         self.args = args
 
         self.D = args.latent_dim
@@ -106,7 +109,8 @@ class GenerativeModel(nn.Module):
     def init_p_z(self):
         # ISOTROPIC GAUSSIAN
         if self.p_z_type == "isotropic_gaussian":
-            return td.Independent(td.Normal(loc=torch.zeros(self.D), scale=torch.ones(self.D)), 1)
+            print("XXXX self.device", self.device)
+            return td.Independent(td.Normal(loc=torch.zeros(self.D, device=self.device), scale=torch.ones(self.D, device=self.device)), 1)
 
         # MIXTURE OF GAUSSIANS
         elif self.p_z_type == "mog":

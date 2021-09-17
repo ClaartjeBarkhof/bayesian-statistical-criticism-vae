@@ -18,13 +18,11 @@ def get_data_loaders(args):
 
     return loaders
 
-def make_run_name(args):
-    if args.image_or_language == "image":
-        name = f"{args.objective} | {args.image_dataset_name.upper()} ({args.data_distribution}) | Q_Z_X: {args.q_z_x_type} " \
-        f"P_Z: {args.p_z_type} P_X_Z: {args.p_x_z_type} DECODER-TYPE: {args.decoder_network_type}"
-        return name
-    else:
-        raise NotImplementedError
+
+
+
+
+
 
 def main():
     args = prepare_parser(print_settings=True)
@@ -43,9 +41,9 @@ def main():
     # trainer.tune(model)
 
     if args.logging:
-        logger = WandbLogger(project=args.wandb_project, name=make_run_name(args))
+        logger = WandbLogger(project=args.wandb_project, name=args.run_name)
         logger.log_hyperparams(args)
-        logger.watch(vae_model)
+        #logger.watch(vae_model) this gives errors on LISA
     else:
         logger = False
 

@@ -11,8 +11,12 @@ from vae_model.sylvester_flows.models.layers import GatedConv2d
 # INFERENCE MODEL
 
 class InferenceModel(nn.Module):
-    def __init__(self, args):
+    def __init__(self, args, device="cpu"):
         super(InferenceModel, self).__init__()
+
+        self.device = device
+
+        print("Inference model device", device)
 
         self.args = args
         self.D = args.latent_dim
@@ -59,7 +63,6 @@ class InferenceModel(nn.Module):
         """Infers a distribution from encoding the input x_in."""
         # [B, 256]
         q_z_x_params = self.q_z_nn(x_in)
-
         q_z_x = self.q_z_x_block(q_z_x_params)
 
         return q_z_x
@@ -67,10 +70,8 @@ class InferenceModel(nn.Module):
     def forward(self, x_in, n_samples=1):
         """Infers a distribution and samples from it with the reparameterisation trick."""
         # [S, B, D]
-        print("inference forward x_in", type(x_in), x_in.shape)
         q_z_x = self.infer_q_z_x(x_in)
         z_post = q_z_x.rsample()  # TODO: sample_shape=(n_samples,)
-        print("inference forward q_z_x, z_post.shape", q_z_x, z_post.shape)
         return q_z_x, z_post
 
 

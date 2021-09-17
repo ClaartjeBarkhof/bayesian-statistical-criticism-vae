@@ -142,7 +142,7 @@ class Objective(nn.Module):
         y = y.unsqueeze(0)
         tiled_x = x.expand(x_size, y_size, dim)
         tiled_y = y.expand(x_size, y_size, dim)
-        kernel_input = (tiled_x - tiled_y).pow(2).mean(2) / torch.Tensor([float(dim)])
+        kernel_input = (tiled_x - tiled_y).pow(2).mean(2) / float(dim) #torch.Tensor([float(dim)], device=x.device)
 
         return torch.exp(-kernel_input)
 
@@ -153,6 +153,7 @@ class Objective(nn.Module):
         """
         x = torch.randn_like(z_post).to(z_post.device)
         y = z_post
+
         x_kernel = self.gaussian_kernel(x, x)
         y_kernel = self.gaussian_kernel(y, y)
         xy_kernel = self.gaussian_kernel(x, y)

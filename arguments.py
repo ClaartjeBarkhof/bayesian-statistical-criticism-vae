@@ -52,7 +52,7 @@ def prepare_parser(jupyter=False, print_settings=True):
 
     # ----------------------------------------------------------------------------------------------------------------
     # LEARNING RATE
-    parser.add_argument("--lr", default=0.00002, type=float,
+    parser.add_argument("--lr", default=0.001, type=float,
                         help="Learning rate.")
     # TODO: parser.add_argument("--lr_scheduler", default=False, type=lambda x: bool(distutils.util.strtobool(x)),
     #                     help="Whether or not to use a lr scheduler (default: True).")
@@ -113,7 +113,7 @@ def prepare_parser(jupyter=False, print_settings=True):
                         help="The name of the dataset, 'cnn_dailymail' by default, else: ptb_text_only.")
     parser.add_argument("--vocab_size", default=50265, type=int,
                         help="Size of the vocabulary size of the tokenizer used.") # 50265 = roberta vocab size
-    parser.add_argument("--num_workers", default=0, type=int,
+    parser.add_argument("--num_workers", default=6, type=int,
                         help="Num workers for data loading.")
     parser.add_argument("--max_seq_len", default=64, type=int,
                         help="What the maximum sequence length the model accepts is (default: 128).")
@@ -126,14 +126,14 @@ def prepare_parser(jupyter=False, print_settings=True):
                         help="Every how many steps to print.")
     parser.add_argument("--logging", default=True, type=lambda x: bool(distutils.util.strtobool(x)),
                         help="Whether or not to log the process of the model (default: True).")
-    parser.add_argument("--log_every_n_steps", default=10, type=int,
+    parser.add_argument("--log_every_n_steps", default=1, type=int,
                         help="Every how many steps to log (default: 20).")
     parser.add_argument("--wandb_project", default='fall-2021-VAE', type=str,
                         help="The name of the W&B project to store runs to.")
 
     # ----------------------------------------------------------------------------------------------------------------
     # CHECKPOINTING
-    parser.add_argument("--checkpoint", default=True, type=lambda x: bool(distutils.util.strtobool(x)),
+    parser.add_argument("--checkpoint", default=False, type=lambda x: bool(distutils.util.strtobool(x)),
                         help="Whether or not to checkpoint (save) the model. (default: False).")
     parser.add_argument("--checkpoint_every_n_steps", default=10, type=int,
                         help="Every how many (training) steps to checkpoint (default: 1000).")
@@ -150,6 +150,8 @@ def prepare_parser(jupyter=False, print_settings=True):
     # GENERAL
     parser.add_argument("--code_dir", default=get_code_dir(), type=str,
                         help="The name of the code dir, depending on LISA or local.")
+    parser.add_argument("--run_name", default="", type=str,
+                        help="Run name that will show up in W&B.")
     parser.add_argument("--fast_dev_run", default=False, type=lambda x: bool(distutils.util.strtobool(x)),
                         help="Whether or not to perform a fast_dev_run.")
 
@@ -160,6 +162,7 @@ def prepare_parser(jupyter=False, print_settings=True):
         sys.argv = [sys.argv[0]]
 
     args = parser.parse_args()
+    args.run_name = make_run_name()
 
     check_settings(args)
 
@@ -184,8 +187,16 @@ def check_valid_option(option, options, setting):
     assert option in options, f"{option} not a valid option for {setting}, valid options: {options}"
 
 def get_code_dir():
-
     return os.path.dirname(os.path.realpath(__file__))
+
+def make_run_name(args):
+    if args.image_or_language == "image":
+        name = f"{args.objective} | {args.image_dataset_name.upper()} ({args.data_distribution}) | Q_Z_X: {args.q_z_x_type} " \
+        f"P_Z: {args.p_z_type} P_X_Z: {args.p_x_z_type} DECODER-TYPE: {args.decoder_network_type}"
+        print("RUN NAME", name)
+        return name
+    else:
+        raise NotImplementedError
 
 
 def check_settings(args):

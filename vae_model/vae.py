@@ -6,7 +6,7 @@ import torch
 from lagrangian_opt.constraint import Constraint, ConstraintOptimizer
 
 
-class VaeModel(pl.LightningModule):
+class VaeModel(nn.Module):
     def __init__(self, args):
         super().__init__()
 
@@ -24,8 +24,10 @@ class VaeModel(pl.LightningModule):
         self.args = args
 
         # VAE = Inference model (encoder) + generative model (decoder)
-        self.inf_model = InferenceModel(args=args)
-        self.gen_model = GenerativeModel(args=args)
+        device = torch.device(f'cuda:{torch.cuda.current_device()}' if torch.cuda.is_available() else 'cpu')
+        print("DEVICE")
+        self.inf_model = InferenceModel(args=args, device=device)
+        self.gen_model = GenerativeModel(args=args, device=device)
 
         # For the rate constraint
         self.mdr_constraint = self.get_mdr_constraint()
@@ -53,8 +55,6 @@ class VaeModel(pl.LightningModule):
         # Image: Bernoulli or Gaussian of [W, H]
         p_x_z = self.gen_model(x_in=x_in, z_post=z_post)  # distribution object
 
-        print("vae forward p_x_z", p_x_z)
-
         # Get the prior of the generative model
         p_z = self.gen_model.p_z  # distribution object
 
@@ -63,11 +63,7 @@ class VaeModel(pl.LightningModule):
     def shared_step(self, batch):
         x_in, labels = batch[0], batch[1]
 
-        #print("x_in type shape", type(x_in), x_in.shape)
-
         q_z_x, z_post, p_z, p_x_z = self.forward(x_in)
-
-        print("before compute loss")
 
         loss_dict = self.objective_module.compute_loss(x_in, q_z_x, z_post, p_z, p_x_z)
 
@@ -90,9 +86,6 @@ class VaeModel(pl.LightningModule):
         # Backward
         self.manual_backward(loss_dict["total_loss"], vae_optimiser)
 
-        # if self.objective == "MDR-VAE":
-        #     self.manual_backward(loss_dict["mdr_loss"], mdr_optimiser)
-
         # Step
         if self.objective == "MDR-VAE":
             mdr_optimiser.step()
@@ -100,33 +93,38 @@ class VaeModel(pl.LightningModule):
         vae_optimiser.step()
 
         self.custom_log(loss_dict, "train")
+        # self.log("TRAIN loss", loss_dict["total_loss"].item(), prog_bar=True)
+        # self.log("loss", loss_dict["total_loss"].item(), prog_bar=True)
 
         if self.objective == "MDR-VAE":
             self.log("train mdr_constraint_lambda", self.mdr_constraint.multiplier,
                      on_step=True, on_epoch=True, prog_bar=True, logger=True)
 
+        return loss_dict["total_loss"] # this is not really necessary right?
+
     def validation_step(self, batch, batch_idx):
         loss_dict = self.shared_step(batch)
-        self.custom_log(loss_dict, "valid")
-
+        #self.custom_log(loss_dict, "valid")
 
     def custom_log(self, loss_dict, phase):
+        print("custom log", phase, loss_dict.keys())
         for k, v in loss_dict.items():
             if v is None:
                 continue
             else:
-                if type(v) is float:
+
+                if type(v) == float:
                     log_val = v
                 else:
                     log_val = v.item()
-                self.log(f"{phase} {k}", log_val, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+                print(phase, k, log_val)
+                self.log(f"{phase} {k}", log_val) #, on_step=True, on_epoch=True, prog_bar=True, logger=True
 
     def configure_optimizers(self):
         # examples for multiple optimisers
-
         vae_optimiser = torch.optim.Adam(self.parameters(), lr=self.args.lr)
+
         if self.objective == "MDR-VAE":
-            print("RETURN MULTIPLE OPTIMIZERS")
             # noinspection PyTypeChecker
             mdr_constraint_optimiser = ConstraintOptimizer(torch.optim.RMSprop, self.mdr_constraint.parameters(),
                                                            self.args.mdr_constraint_optim_lr)
@@ -135,6 +133,5 @@ class VaeModel(pl.LightningModule):
             return [vae_optimiser, mdr_constraint_optimiser]
 
         else:
-            print("RETURN SINGLE OPTIMISER")
             self.vae_optimiser = vae_optimiser
             return vae_optimiser
