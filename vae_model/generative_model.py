@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.distributions as td
 
-from vae_model.sylvester_flows.models.layers import GatedConvTranspose2d
+from  import GatedConvTranspose2d
 from vae_model.distributions import AutoRegressiveDistribution
 from vae_model.made import MADE
 
