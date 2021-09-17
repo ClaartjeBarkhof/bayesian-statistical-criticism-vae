@@ -2,7 +2,7 @@ from torch.distributions import kl_divergence
 import torch
 import torch.nn as nn
 import torch.distributions as td
-from lagrangian_opt.constraint import Constraint
+from pytorch_constrained_opt.constraint import Constraint
 from torch_two_sample import MMDStatistic
 
 class Objective(nn.Module):

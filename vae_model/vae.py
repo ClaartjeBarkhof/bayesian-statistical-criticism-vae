@@ -1,10 +1,6 @@
-import pytorch_lightning as pl
 from .generative_model import GenerativeModel
 from .inference_model import InferenceModel
-from objective import Objective
-import torch
 import torch.nn as nn
-from lagrangian_opt.constraint import Constraint, ConstraintOptimizer
 
 
 class VaeModel(nn.Module):

@@ -2,9 +2,10 @@ import torch
 import torch.nn as nn
 import torch.distributions as td
 
-from  import GatedConvTranspose2d
+from sylvester_flows.models.layers import GatedConvTranspose2d
 from vae_model.distributions import AutoRegressiveDistribution
 from vae_model.made import MADE
+
 
 class GenerativeModel(nn.Module):
     def __init__(self, args, device="cpu"):
