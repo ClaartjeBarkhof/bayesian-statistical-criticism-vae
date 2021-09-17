@@ -100,6 +100,10 @@ class ImageDataset:
         test_loader = DataLoader(self.test_set, batch_size=self.batch_size, shuffle=False, num_workers=self.num_workers)
         return test_loader
 
+    def get_train_validation_loaders(self):
+        loaders = dict(train=self.train_loader(), valid=self.valid_loader())
+        return loaders
+
 
 def greater_than_zero(x):
     return x > 0

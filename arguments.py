@@ -3,6 +3,7 @@ import configargparse
 import sys
 import os
 
+
 def prepare_parser(jupyter=False, print_settings=True):
     parser = configargparse.ArgParser()
     parser.add_argument('--config_file', required=False, is_config_file=True, help='config file path')
@@ -45,7 +46,7 @@ def prepare_parser(jupyter=False, print_settings=True):
     # BATCHES / TRAIN STEPS
     parser.add_argument("--batch_size", default=32, type=int,
                         help="Batch size for data loading and training.")
-    parser.add_argument("--max_steps", default=1e6, type=int,
+    parser.add_argument("--max_steps", default=int(1e6), type=int,
                         help="Maximum number of train steps in total.")
     parser.add_argument("--max_epochs", default=10, type=int,
                         help="Maximum number of epochs, if -1 no maximum number of epochs is set.")
@@ -91,7 +92,8 @@ def prepare_parser(jupyter=False, print_settings=True):
 
     # ----------------------------------------------------------------------------------------------------------------
     # GENERAL DATASET ARGUMENTS
-    parser.add_argument("--data_dir", default=get_code_dir()+'/data', type=str, help="The name of the data directory.")
+    parser.add_argument("--data_dir", default=get_code_dir() + '/data', type=str,
+                        help="The name of the data directory.")
     parser.add_argument("--image_or_language", default='image', type=str,
                         help="The type of the dataset, options: 'image' or 'language'.")
     parser.add_argument("--data_distribution", default='bernoulli', type=str,
@@ -112,7 +114,7 @@ def prepare_parser(jupyter=False, print_settings=True):
     parser.add_argument("--language_dataset_name", default='ptb_text_only', type=str,
                         help="The name of the dataset, 'cnn_dailymail' by default, else: ptb_text_only.")
     parser.add_argument("--vocab_size", default=50265, type=int,
-                        help="Size of the vocabulary size of the tokenizer used.") # 50265 = roberta vocab size
+                        help="Size of the vocabulary size of the tokenizer used.")  # 50265 = roberta vocab size
     parser.add_argument("--num_workers", default=6, type=int,
                         help="Num workers for data loading.")
     parser.add_argument("--max_seq_len", default=64, type=int,
@@ -122,9 +124,9 @@ def prepare_parser(jupyter=False, print_settings=True):
     # PRINTING & LOGGING
     parser.add_argument("--print_stats", default=True, type=lambda x: bool(distutils.util.strtobool(x)),
                         help="Whether or not print stats.")
-    parser.add_argument("--print_every_n_steps", default=10, type=int,
+    parser.add_argument("--print_every_n_steps", default=1, type=int,
                         help="Every how many steps to print.")
-    parser.add_argument("--logging", default=True, type=lambda x: bool(distutils.util.strtobool(x)),
+    parser.add_argument("--logging", default=False, type=lambda x: bool(distutils.util.strtobool(x)),
                         help="Whether or not to log the process of the model (default: True).")
     parser.add_argument("--log_every_n_steps", default=1, type=int,
                         help="Every how many steps to log (default: 20).")
@@ -155,20 +157,19 @@ def prepare_parser(jupyter=False, print_settings=True):
     parser.add_argument("--fast_dev_run", default=False, type=lambda x: bool(distutils.util.strtobool(x)),
                         help="Whether or not to perform a fast_dev_run.")
 
-
     # TODO: add seed & deterministic
 
     if jupyter:
         sys.argv = [sys.argv[0]]
 
     args = parser.parse_args()
-    args.run_name = make_run_name()
+    args.run_name = make_run_name(args)
 
     check_settings(args)
 
     if print_settings: print_args(args)
 
-    return parser.parse_args()
+    return args
 
 
 def print_args(args):
@@ -186,18 +187,15 @@ def print_args(args):
 def check_valid_option(option, options, setting):
     assert option in options, f"{option} not a valid option for {setting}, valid options: {options}"
 
+
 def get_code_dir():
     return os.path.dirname(os.path.realpath(__file__))
 
-def make_run_name(args):
-    if args.image_or_language == "image":
-        name = f"{args.objective} | {args.image_dataset_name.upper()} ({args.data_distribution}) | Q_Z_X: {args.q_z_x_type} " \
-        f"P_Z: {args.p_z_type} P_X_Z: {args.p_x_z_type} DECODER-TYPE: {args.decoder_network_type}"
-        print("RUN NAME", name)
-        return name
-    else:
-        raise NotImplementedError
 
+def make_run_name(args):
+    name = f"{args.objective} | {args.image_dataset_name.upper()} ({args.data_distribution}) | Q_Z_X: {args.q_z_x_type} " \
+           f"P_Z: {args.p_z_type} P_X_Z: {args.p_x_z_type} DECODER-TYPE: {args.decoder_network_type}"
+    return name
 
 def check_settings(args):
     # DATA DISTRIBUTION / DATA SET CHOICES

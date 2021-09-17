@@ -16,8 +16,6 @@ class InferenceModel(nn.Module):
 
         self.device = device
 
-        print("Inference model device", device)
-
         self.args = args
         self.D = args.latent_dim
         self.L = args.max_seq_len
@@ -95,7 +93,6 @@ class IndependentGaussianBlock(nn.Module):
         q_z_x = td.Independent(td.Normal(loc=mean, scale=scale), 1)
 
         return q_z_x
-
 
 class ConditionalGaussianBlockMADE(nn.Module):
     def __init__(self, args):

@@ -1,8 +1,9 @@
 from torch.distributions import kl_divergence
-from torch.optim import RMSprop
 import torch
 import torch.nn as nn
 import torch.distributions as td
+from lagrangian_opt.constraint import Constraint
+from torch_two_sample import MMDStatistic
 
 
 class Objective(nn.Module):
@@ -18,14 +19,20 @@ class Objective(nn.Module):
       - INFO-VAE, with alpha and lambda argument set  (Zhao et al., 2017)
       - LAG-INFO-VAE (Zhao et al., 2017)
     """
-    def __init__(self, args, mdr_constraint=None):
+
+    def __init__(self, args, device="cpu"):
         super(Objective, self).__init__()
 
-        self.objective = args.objective
+        self.device = device
         self.data_distribution = args.data_distribution
         self.image_or_language = args.image_or_language
         self.args = args
-        self.mdr_constraint = mdr_constraint
+
+        self.mdr_constraint = self.get_mdr_constraint()
+
+    def get_mdr_constraint(self):
+        return Constraint(self.args.mdr_value, "ge", alpha=0.5).to(
+            self.device) if self.args.objective == "MDR-VAE" else None
 
     def compute_loss(self, x_in, q_z_x, z_post, p_z, p_x_z):
         """
@@ -77,25 +84,26 @@ class Objective(nn.Module):
         # z_post at this point is [1, B, D]
         mmd = self.maximum_mean_discrepancy(z_post.squeeze(0))
 
-        total_loss, mdr_loss = None, None
-        if self.objective == "AE":
+        total_loss, mdr_loss, mdr_multiplier = None, None, None
+        if self.args.objective == "AE":
             total_loss = nll
-        elif self.objective == "VAE":
+        elif self.args.objective == "VAE":
             total_loss = nll + kl_prior_post
-        elif self.objective == "BETA-VAE":
+        elif self.args.objective == "BETA-VAE":
             total_loss = nll + self.args.beta_beta
-        elif self.objective == "MDR-VAE":
+        elif self.args.objective == "MDR-VAE":
             # the gradients for the constraints are recorded at some other point
             mdr_loss = self.mdr_constraint(kl_prior_post).squeeze()
+            mdr_multiplier = self.mdr_constraint.multiplier
             total_loss = nll + kl_prior_post + mdr_loss
-        elif self.objective == "FB-VAE":
+        elif self.args.objective == "FB-VAE":
             raise NotImplementedError
-        elif self.objective == "INFO-VAE":
+        elif self.args.objective == "INFO-VAE":
             # gain = ll - (1 - a)*kl_prior_post - (a + l - 1)*marg_kl
             # loss = nll + (1 - a)*kl_prior_post + (a + l - 1)*marg_kl
             total_loss = nll + ((1 - self.args.info_alpha) * kl_prior_post) \
                          + ((self.args.info_alpha + self.args.info_lambda - 1) * mmd)
-        elif self.objective == "LAG-INFO-VAE":
+        elif self.args.objective == "LAG-INFO-VAE":
             # https://github.com/ermongroup/lagvae/blob/master/methods/lagvae.py
             raise NotImplementedError
 
@@ -103,6 +111,7 @@ class Objective(nn.Module):
             total_loss=total_loss,
             mmd=mmd,
             mdr_loss=mdr_loss,
+            mdr_multiplier=mdr_multiplier,
             nll=nll,
             kl_prior_post=kl_prior_post
         )
@@ -130,33 +139,13 @@ class Objective(nn.Module):
 
         return kl
 
-    @staticmethod
-    def gaussian_kernel(x, y):
-        """
-        Taken from: https://github.com/aktersnurra/information-maximizing-variational-autoencoders/blob/master/model/loss_functions/mmd_loss.py
-        """
-        x_size = x.size(0)
-        y_size = y.size(0)
-        dim = x.size(1)
-        x = x.unsqueeze(1)
-        y = y.unsqueeze(0)
-        tiled_x = x.expand(x_size, y_size, dim)
-        tiled_y = y.expand(x_size, y_size, dim)
-        kernel_input = (tiled_x - tiled_y).pow(2).mean(2) / float(dim) #torch.Tensor([float(dim)], device=x.device)
-
-        return torch.exp(-kernel_input)
-
     def maximum_mean_discrepancy(self, z_post):
-        """
-        Taken from: https://github.com/aktersnurra/information-maximizing-variational-autoencoders/blob/master/model/loss_functions/mmd_loss.py
+        z_post = z_post.squeeze(1)
+        prior_sample = torch.randn(z_post.shape).to(z_post.device)
+        alphas = [0.1 * i for i in range(5)]
 
-        """
-        x = torch.randn_like(z_post).to(z_post.device)
-        y = z_post
+        n_1, n_2 = len(z_post), len(prior_sample)
+        MMD_stat = MMDStatistic(n_1, n_2)
+        tts_mmd = MMD_stat(z_post, prior_sample, alphas, ret_matrix=False)
 
-        x_kernel = self.gaussian_kernel(x, x)
-        y_kernel = self.gaussian_kernel(y, y)
-        xy_kernel = self.gaussian_kernel(x, y)
-        mmd = x_kernel.mean() + y_kernel.mean() - 2 * xy_kernel.mean()
-
-        return mmd
+        return tts_mmd
