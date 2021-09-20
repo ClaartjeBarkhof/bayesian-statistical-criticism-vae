@@ -5,174 +5,228 @@ import torch.distributions as td
 
 
 class AutoRegressiveDistribution(nn.Module):
-    def __init__(self, context, made, dist_type="gaussian", state=None):
+    def __init__(self, context, made, dist_type="gaussian", sample=None, params=None, encoder=True):
         super(AutoRegressiveDistribution, self).__init__()
 
-        assert dist_type in ["gaussian", "bernoulli"]
+        assert dist_type in ["gaussian", "bernoulli"], \
+            "AutoRegressiveDistribution only supports gaussian and bernoulli for now"
 
+        # Gaussian encoder: context x [B, Hidden_dim]
+        # Bernoulli decoder: context z [S, B, D]
         self.context = context
-        self.dist_type = dist_type
+        print("context.shape")
+
+        self.dist_type = dist_type  # gaussian or bernoulli
+        self.encoder = encoder  # encoder or decoder
+        assert (self.encoder and dist_type == "gaussian") or (not self.encoder and dist_type == "bernoulli"), \
+            "Either Gaussian encoder or Bernoulli decoder, multinomial decoder is not implemented yet."
+
         self.made = made
-        # latent_dim or image dim (C x H x W)
+        # Sample dim: latent_dim (D) or image dim (C x H x W)
         self.x_z_dim = self.made.nin
 
-        # Gaussian: state = (z, mu, scale)
-        # Bernoulli state = (x, logits)
-        self.state = state
+        # Gaussian: sample z [S, B, D], params (mu, scale): ([S, B, D], [S, B, D])
+        # Bernoulli sample x [B, X_dim], params (logits): [S, B, X_dim]
+        self.sample = sample
+        self.params = params
 
-    def log_prob(self, x_z):
-        """
+    def log_prob(self, x_z, mean_reduce_sample_dim=False):
+        print("-> in log_prob")
+        # GAUSSIAN ENCODER CASE
+        # If encoder, we expect the context X to be 2D [B, Hidden_dim]
+        # and we expect the samples Z to be 3D [S, B, D]
 
-            x_z may be 2-dimensional in a normal forward in the encoder of x
-            context may be 3 dimensional after a
+        if self.encoder:
+            # (B, H_dim) = self.context.shape
+            (S, B, D) = x_z.shape
+            input_z = x_z
 
-            context may be 3-dimensional in a multi-sample forward in the decoder of z: [S, B, D]
+            print("input_z.shape", input_z.shape)
 
-
-        """
-        x_z_shape = x_z.shape
-        context_shape = self.context.shape
-
-        # multi-sample z [S, B, D]
-        if self.context.dim() == 3:
-            # [S, B, D]
-            (S, B, D)  = context_shape
-            if S > 1:
-                # [S, B, D] -> [S*B, D]
-                context = self.context.reshape(-1, D)
-                # [B, D] -> [S*B, D]
-                # Eg: [x_1, x_2, x_1, x_2, x_1, x_2] for 3 samples of batch of 2 elements
-                x_z = x_z.repeat(S, 1, 1).reshape(S*B, -1)
-            # [1, B, D]
+            if self.params is not None:
+                # [B, D]
+                mean, scale = self.params
+                print("mean.shape, scale.shape", mean.shape, scale.shape)
             else:
-                context = self.context.squeeze(0)
-        else:
-            context = self.context
+                context_x = self.context
 
-        if self.state is not None:
-            params = self.state[1:]
-        else:
-            made_out_params = self.made(x_z, context=context)
+                # [S*B, H_dim]
+                context_x = context_x.repeat(S, 1, 1).reshape(S * B, -1)
 
-            # All should be [B, D]
-            if self.dist_type == "gaussian":
-
-                params_split = torch.split(made_out_params, 2, dim=1)
+                # [S*B, D*2]
+                params = self.made(input_z, context=context_x)
+                params_split = torch.split(params, 2, dim=1)
                 mean, pre_scale = params_split[0], params_split[1]
-
                 scale = F.softplus(pre_scale)
-                params = (mean, scale)  # mean, scale for Gaussian
+
+                print("mean.shape, scale.shape", mean.shape, scale.shape)
+
+            # [S, B]
+            log_prob_z_x = td.Independent(td.Normal(loc=mean, scale=scale), 1).log_prob(input_z)
+            print("log_prob_z_x.shape", log_prob_z_x.shape)
+
+            # [S, B] -> [B,]
+            if mean_reduce_sample_dim:
+                log_prob_z_x = log_prob_z_x.mean(dim=0)
+
+            return log_prob_z_x
+
+        # BERNOULLI DECODER CASE
+        # If decoder, we expect the context Z to be 3D [S, B, D]
+        # and we expect the samples X to be 2D or 3D (not implemented yet)
+        else:
+            (S, B, D) = self.context.shape
+            input_x = x_z
+
+            if self.params is not None:
+                bern_logits = self.params.reshape(S*B, -1)
 
             else:
+                # If input X is 3D as well, we assume one sample per data point
+                assert input_x.dim() == 2, "did not implement the 3D input case yet..."
 
-                # [S*B, self.x_z_dim]
-                params = (made_out_params,)  # logits for Bernoulli
+                # If input X is 2D, we assume the samples to correspond to multiple samples per data point
+                # Merge the sample dimension into the batch dimension:
+                # [S, B, D] -> [S*B, D]
+                context_z = self.context.reshape(-1, D)
 
-        self.state = (x_z,) + params
-        #print("self.state", self.state)
+                # Copy the context to match the sample dimension
+                # [B, X_dim] -> [S*B, X_dim]
+                # Eg: [x_1, x_2, x_1, x_2, x_1, x_2] for 3 samples of batch of 2 elements
+                input_x = x_z.repeat(S, 1, 1).reshape(S * B, -1)
 
-        # For latent space
-        if self.dist_type == "gaussian":
-            mean, scale = params
-            # careful that the distribution itself is not independent, but at this point it is valid to use for log_prob
-            # log_prob = log q_z_x
-            # [B, D] (D independent Gaussians)
-            assert mean.shape == (self.context.shape[0], self.D), "mean is supposed to be of shape [B, D]"
-            assert scale.shape == (self.context.shape[0], self.D), "scale is supposed to be of shape [B, D]"
-            log_prob = td.Independent(td.Normal(loc=mean, scale=scale), 1).log_prob(x_z)
-            assert log_prob.shape == (self.context.shape[0],), "log_prob is supposed to be of shape [B,]"
+                # [S*B, X_dim]
+                bern_logits = self.made(input_x, context=context_z)
+                self.params = bern_logits.reshape(S, B, -1)
 
-        # For output space
-        elif self.dist_type == "bernoulli":
-            logits = params[0]
-            # Reintroduce the sample dimension [S*B, -1] -> [S, B, -1]
-            if len(x_z_shape) == 3:
-                logits = logits.reshape(x_z_shape[0], x_z_shape[1], -1)
-            # log_prob = log p_x_z
-            # here the data dim is flattened, hence reinterpreted_batch_ndims=1
-            log_prob = td.Independent(td.Bernoulli(logits=logits), 1).log_prob(x_z)
-            assert log_prob.shape == (self.context.shape[0],), "log_prob is supposed to be of shape [B,]"
+            # [S*B] reinterpreted_batch_ndims=1 because we are working with flattened input
+            log_prob_x_z = td.Independent(td.Bernoulli(logits=bern_logits), 1).log_prob(input_x)
 
-        else:
-            raise NotImplementedError
+            # [S, B]
+            log_prob_x_z = log_prob_x_z.reshape(S, B)
 
-        return log_prob
+            # [S, B] -> [B,]
+            if mean_reduce_sample_dim:
+                log_prob_x_z = log_prob_x_z.mean(dim=0)
 
-    def rsample(self, sample_shape=None):
-        # TODO: multi rsample?
-        if sample_shape is not None:
-            assert len(sample_shape) == 1, "only accepting 1 dimensional shape for sample_shape (S,)"
+            return log_prob_x_z
+
+    def rsample(self, sample_shape=(1,)):
+        # Context X: [B, D]
+        # Sample Z: [S, B, D]
+        # Params (mean, scale): 2 x [S, B, D]
+
+        assert len(sample_shape) == 1, "only accepting 1 dimensional shape for sample_shape (S,)"
         assert self.dist_type == "gaussian", "This functionality is only implemented for the Gaussian case."
 
         B = self.context.shape[0]
+        D = self.x_z_dim
+        S = sample_shape[0]
 
-        if sample_shape is not None:
-            z_sample = torch.zeros((sample_shape[0], B, self.x_z_dim), device=self.context.device)
-        else:
-            z_sample = torch.zeros((B, self.x_z_dim), device=self.context.device)
+        print("S B D", S, B, D)
+
+        z_sample = torch.zeros((S, B, D), device=self.context.device)
+        print("z_sample.shape")
 
         mu_inferred, scale_inferred = [], []
 
         for i in range(self.x_z_dim):
-            mus_prescales = self.made(z_sample, context=self.context)
-            # split in 2 x [B, D]
-            mus_prescales = torch.split(mus_prescales, 2, dim=1)
+            # [S*B, D*2]
+            z_reshape = z_sample.reshape(S*B, D)
+            mus_prescales = self.made(z_reshape, context=self.context)
+            print("mu_prescales.shape", mus_prescales.shape)
+            mus_prescales = mus_prescales.reshape(S, B, D*2)
+            print("mu_prescales.shape (after reshape)", mus_prescales.shape)
+
+            # split in 2 x [S, B, D]
+            mus_prescales = torch.split(mus_prescales, 2, dim=-1)
             mus, prescales = mus_prescales[0], mus_prescales[1]
 
-            mu_i = mus[:, i]
-            scale_i = F.softplus(prescales[:, i])
+            print("mus, prescales shapes", mus.shape, prescales.shape)
+
+            # i-th dimension [S, B, i] = shape (S, B)
+            mu_i = mus[:, :, i]
+            scale_i = F.softplus(prescales[:, :, i])
+
+            print("mu_i.shape", mu_i.shape)
+            print("scale_i.shape", scale_i.shape)
 
             mu_inferred.append(mu_i)
             scale_inferred.append(scale_i)
 
             # [S, B]
-            z_i = td.Normal(loc=mu_i, scale=scale_i).rsample(sample_shape=sample_shape)
+            # don't pass sample shape because it is already implicit through set-up of shapes (S, B, D)
+            assert mu_i.shape == scale_i.shape == (S, B), "expecting mu_i and scale_i to be (S, B) - for one dimension"
+
+            z_i = td.Normal(loc=mu_i, scale=scale_i).rsample()
+
             z_sample[:, :, i] = z_i
 
-        # [B, D]
-        mu_inferred = torch.stack(mu_inferred, dim=1)
-        scale_inferred = torch.stack(scale_inferred, dim=1)
+        # [S, B, D]
+        mu_inferred = torch.stack(mu_inferred, dim=-1)
+        scale_inferred = torch.stack(scale_inferred, dim=-1)
 
-        # [S, B, D], [B, D], [B, D]
-        self.state = (z_sample, mu_inferred, scale_inferred)
+        # [S, B, D], [S, B, D], [S, B, D]
+        self.sample = z_sample
+        self.params = (mu_inferred, scale_inferred)
+
+        print("z_sample.shape", z_sample.shape)
+        print("mu_inferred.shape", mu_inferred.shape)
+        print("scale_inderred.shape", scale_inferred.shape)
 
         return z_sample
 
-    def sample(self, C, W, H):
-        # TODO: multi sample?
-        assert self.dist_type == "bernoulli", "This functionality has only been implemented for the Bernoulli case so far."
-
-        B = self.context.shape[0]
-        x_sample = torch.zeros((B, self.x_z_dim))
-
-        # logits_inferred = []
-
-        for i in range(self.x_z_dim):
-            logits = self.made(x_sample, context=self.context)
-            logits_i = logits[:, i]
-
-            x_sample[:, i] = td.Bernoulli(logits=logits_i).sample()
-
-        # logits_inferred = torch.stack(logits_inferred, dim=1)
-        # TODO: should this change the state?
-
-        x_sample = x_sample.reshape(B, C, W, H)  # TOD: check this
-
-        return x_sample
+    def sample(self, C, W, sample_shape=None):
+        raise NotImplementedError
+        # if self.context.shape[0] > 1:
+        #     print("Not implemented multi sample decoder for multi-sample Z context")
+        #     raise NotImplementedError
+        #
+        # context_z = self.context.squeeze(0)
+        #
+        # if sample_shape is not None:
+        #     assert len(sample_shape) == 1, "only accepting 1 dimensional shape for sample_shape (S,)"
+        #
+        # assert self.dist_type == "bernoulli", "This functionality has only been implemented for the Bernoulli case so far."
+        #
+        # B = self.context.shape[0]
+        #
+        # if sample_shape is not None:
+        #     x_sample = torch.zeros((sample_shape[0], B, self.x_z_dim))
+        # else:
+        #     x_sample = torch.zeros((B, self.x_z_dim))
+        #
+        # logits = torch.zeros((B, self.x_z_dim))
+        #
+        # for i in range(self.x_z_dim):
+        #     logits = self.made(logits, context=context_z)
+        #     logits_i = logits[:, i]
+        #
+        #     x_sample[:, :, i] = td.Bernoulli(logits=logits_i).sample()
+        #
+        # # logits_inferred = torch.stack(logits_inferred, dim=1)
+        # # TODO: should this change the state?
+        #
+        # x_sample = x_sample.reshape(B, C, W, H)  # TOD: check this
+        #
+        # return x_sample
 
 
 @td.register_kl(AutoRegressiveDistribution, AutoRegressiveDistribution)
 def _kl(p, q):
     assert p.dist_type == q.dist_type == "gaussian", "Both AutoRegressiveDistributions should be Gaussian."
 
-    if p.state is None:
+    if p.params is None:
         _ = p.rsample()
-    p_mean, p_scale = p.state[1], p.state[2]
+    p_mean, p_scale = p.params[0], p.params[1]
 
-    if q.state is None:
+    if q.params is None:
         _ = q.rsample()
-    q_mean, q_scale = q.state[1], q.state[2]
 
+    # [S, B, D]
+    q_mean, q_scale = q.params[0], q.params[1]
+
+    # [S, B]
     kl = td.kl_divergence(td.Normal(loc=p_mean, scale=p_scale), td.Normal(loc=q_mean, scale=q_scale)).sum(-1)
 
     return kl
@@ -182,9 +236,10 @@ def _kl(p, q):
 def _kl(p, q):
     assert p.dist_type == "gaussian", "The AutoRegressiveDistributions should be Gaussian."
 
-    if p.state is None:
+    if p.params is None:
         _ = p.rsample()
-    p_mean, p_scale = p.state[1], p.state[2]
+
+    p_mean, p_scale = p.params[0], p.params[1]
 
     kl = td.kl_divergence(td.Normal(loc=p_mean, scale=p_scale), q).sum(-1)
 
@@ -193,10 +248,15 @@ def _kl(p, q):
 
 @td.register_kl(AutoRegressiveDistribution, td.Distribution)
 def _kl(p, q):
-    if p.state is None:
+    if p.params is None:
+        print("r_sample")
         z = p.rsample()
     else:
-        z = p.state[0]
+        print("get sample")
+        z = p.sample
+
+    print("z", z.shape)
+    print("p", type(p))
 
     log_p_z = p.log_prob(z)
     log_q_z = q.log_prob(z)

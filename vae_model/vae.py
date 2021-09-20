@@ -22,13 +22,13 @@ class VaeModel(nn.Module):
 
     def forward(self, x_in):
         # Infer the approximate posterior q(z|x) and sample from it to obtain z_post
-        # [B, D]
+        # [B, D], [S, B, D]
+        print("vae.forward x_in.shape", x_in.shape)
         q_z_x, z_post = self.inf_model(x_in=x_in, n_samples=1)
+        assert z_post.dim() == 3, "samples from the posterior must be 3D (S, B, D)"
 
         # Make predictions / generate based on the inferred latent
-        # Language: Categorical of [B, L]
-        # Image: Bernoulli or Gaussian of [W, H]
-        p_x_z = self.gen_model(x_in=x_in, z_post=z_post)  # distribution object
+        p_x_z = self.gen_model(x_in=x_in, z_post=z_post)  # distribution-like object
 
         # Get the prior of the generative model
         p_z = self.gen_model.p_z  # distribution object

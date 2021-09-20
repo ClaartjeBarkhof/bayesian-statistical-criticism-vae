@@ -56,10 +56,8 @@ class Trainer:
             raise ValueError("Unknown optimizer: %s" % name)
         return cls(params=parameters, lr=lr, weight_decay=l2_weight)
 
-    def shared_step(self, batch):
+    def shared_step(self, x_in):
         self.vae_model.eval()
-
-        x_in, labels = batch[0], batch[1]
 
         x_in = x_in.to(self.device)
 
@@ -69,21 +67,21 @@ class Trainer:
 
         return loss_dict
 
-    def train_step(self, batch):
+    def train_step(self, x_in):
         self.vae_model.train()
 
         for _, o in self.optimisers.items():
             o.zero_grad()
 
         # Forward
-        loss_dict = self.shared_step(batch)
+        loss_dict = self.shared_step(x_in)
 
         # Backward
         loss_dict["total_loss"].backward()
 
-        if self.args.max_gradient_norm > 0:
-            torch.nn.utils.clip_grad_norm_(parameters=self.vae_model.parameters(),
-                                           max_norm=self.args.max_gradient_norm, norm_type=float("inf"))
+        # if self.args.max_gradient_norm > 0:
+        #     torch.nn.utils.clip_grad_norm_(parameters=self.vae_model.parameters(),
+        #                                    max_norm=self.args.max_gradient_norm, norm_type=float("inf"))
 
         # Step
         for _, o in self.optimisers.items():
@@ -101,11 +99,12 @@ class Trainer:
         for epoch in range(1000):
             for phase in ["train", "valid"]:
                 for batch_idx, batch in enumerate(self.data_loaders[phase]):
+                    X, _ = batch
 
                     if phase == "train":
-                        loss_dict = self.train_step(batch)
+                        loss_dict = self.train_step(X)
                     else:
-                        loss_dict = self.validation_step(batch)
+                        loss_dict = self.validation_step(X)
 
                     if self.args.logging and step % self.args.log_every_n_steps == 0:
                         utils.log_step(loss_dict, step, epoch, phase)

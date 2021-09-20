@@ -67,6 +67,7 @@ class InferenceModel(nn.Module):
         """Infers a distribution from encoding the input x_in."""
         # [B, 256]
         q_z_x_params = self.q_z_nn(x_in)
+        print("q_z_x_params", q_z_x_params.shape)
         q_z_x = self.q_z_x_block(q_z_x_params)
 
         return q_z_x
@@ -123,7 +124,7 @@ class ConditionalGaussianBlockMADE(nn.Module):
 
     def forward(self, q_z_x_params):
         # Placeholder distribution object
-        q_z_x = AutoRegressiveDistribution(context=q_z_x_params, made=self.made, dist_type="gaussian")
+        q_z_x = AutoRegressiveDistribution(context=q_z_x_params, made=self.made, dist_type="gaussian", encoder=True)
 
         return q_z_x
 
@@ -216,5 +217,7 @@ class EncoderMLPBlock(nn.Module):
 
     def forward(self, x_in):
         # reshape to [B, image_w*image_h*C]
+        print("x_in.shape", x_in.shape)
         x_in_flat = x_in.reshape(x_in.shape[0], -1)
+        print("x_in_flat.shape", x_in_flat.shape)
         return self.encoder_mlp_block(x_in_flat)

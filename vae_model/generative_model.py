@@ -81,10 +81,10 @@ class GenerativeModel(nn.Module):
                 the number of samples it should return.
 
         Output:
-            z_prior: [S, D]
+            z_prior: [S, 1, D]
                 samples from the prior of dimensionality of the latent space.
         """
-        z_prior = self.p_z.sample(sample_shape=(S,))
+        z_prior = self.p_z.sample(sample_shape=(S, 1))
 
         return z_prior
 
@@ -98,23 +98,31 @@ class GenerativeModel(nn.Module):
         Returns a distribution-like object with parameters [S, B, ...], reducing ... as dimensions for log_prob
         """
 
+        print("in generative model.p_x_z, z.shape", z.shape)
+
         if self.decoder_network_type == "conditional_made_decoder":
-            # TODO
+            print("-> gen_model.forward if conditional_made_decoder")
+
             p_x_z = self.decoder_network(z)
+
         else:
-            # In case of 3 dimensional z [S, B, D], reduce S in B for forward
+            print("-> gen_model.forward if NOT conditional_made_decoder")
+
+            # Z [S, B, D], reduce S in B for forward
+            (S, B, D) = z.shape
             p_x_z_params = self.decoder_network(z.reshape(-1, z.shape[-1]))
 
             if self.p_x_z_type == "bernoulli":
                 # p_x_z_params: [B*S, C, W, H] -> [S, B, C, W, H]
-                p_x_z_params = p_x_z_params.reshape(z.shape[0], z.shape[-1], self.C, self.image_w_h, self.image_w_h)
+                p_x_z_params = p_x_z_params.reshape(S, B, self.C, self.image_w_h, self.image_w_h)
                 p_x_z = td.Independent(td.Bernoulli(logits=p_x_z_params), 3)  # reduce last 3 dimensions with log_prob
 
             elif self.p_x_z_type == "multinomial":
-                # image: p_x_z_params: [B*S, C, num_classes, W, H] -> [BS, C, num_classes, W, H]
-                p_x_z_params = p_x_z_params.reshape(z.shape[0], z.shape[-1], self.C, self.image_w_h, self.image_w_h)
-                # [B, C, num_classes, W, H] -> [B, C, W, H, num_classes]
-                p_x_z_params = p_x_z_params.permute(0, 1, 3, 4, 2)
+                # image: p_x_z_params: [B*S, C, num_classes, W, H] -> [S, B, C, num_classes, W, H]
+                num_classes = 256
+                p_x_z_params = p_x_z_params.reshape(S, B, num_classes, self.C, self.image_w_h, self.image_w_h)
+                # [S, B, C, num_classes, W, H] -> [S, B, C, W, H, num_classes]
+                p_x_z_params = p_x_z_params.permute(0, 1, 2, 4, 5, 3)
 
                 p_x_z = td.Categorical(logits=p_x_z_params)
 
@@ -142,10 +150,13 @@ class GenerativeModel(nn.Module):
     def get_decoder_network(self):
         if self.decoder_network_type == "basic_deconv_decoder":
             return DecoderGatedConvolutionBlock(args=self.args)
+
         elif self.decoder_network_type == "basic_mlp_decoder":
             return DecoderMLPBlock(args=self.args)
+
         elif self.decoder_network_type == "conditional_made_decoder":
             return ConditionalBernoulliBlockMADE(args=self.args)
+
         else:
             raise NotImplementedError
 
@@ -166,7 +177,7 @@ class ConditionalBernoulliBlockMADE(nn.Module):
 
     def forward(self, z):
         # Placeholder distribution object
-        p_x_z = AutoRegressiveDistribution(context=z, made=self.made, dist_type="bernoulli")
+        p_x_z = AutoRegressiveDistribution(context=z, made=self.made, dist_type="bernoulli", encoder=False)
 
         return p_x_z
 
