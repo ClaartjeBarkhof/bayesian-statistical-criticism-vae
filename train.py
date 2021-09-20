@@ -2,9 +2,11 @@ from arguments import prepare_parser
 from vae_model.vae import VaeModel
 import torch
 from dataset_dataloader import ImageDataset
-from lagrangian_opt.constraint import ConstraintOptimizer
+from pytorch_constrained_opt.constraint import ConstraintOptimizer
 from objective import Objective
 import utils
+import torch.optim as optim
+from functools import partial
 
 
 class Trainer:
@@ -19,18 +21,44 @@ class Trainer:
         self.optimisers = self.get_optimisers()
 
     def get_optimisers(self):
-        vae_optimiser = torch.optim.Adam(self.vae_model.parameters(), lr=self.args.lr)
+        inf_optimiser = self.init_optimiser(self.args.inf_opt, self.vae_model.inf_model.parameters(), self.args.inf_lr,
+                                            self.args.inf_l2_weight, self.args.inf_momentum)
+        gen_optimiser = self.init_optimiser(self.args.gen_opt, self.vae_model.gen_model.parameters(),
+                                            self.args.gen_lr, self.args.gen_l2_weight, self.args.gen_momentum)
 
         if self.args.objective == "MDR-VAE":
             # noinspection PyTypeChecker
             mdr_constraint_optimiser = ConstraintOptimizer(torch.optim.RMSprop,
                                                            self.objective.mdr_constraint.parameters(),
                                                            self.args.mdr_constraint_optim_lr)
-            return dict(vae_optimiser=vae_optimiser, mdr_constraint_optimiser=mdr_constraint_optimiser)
+            return dict(inf_optimiser=inf_optimiser, gen_optimiser=gen_optimiser,
+                        mdr_constraint_optimiser=mdr_constraint_optimiser)
         else:
-            return dict(vae_optimiser=vae_optimiser)
+            return dict(inf_optimiser=inf_optimiser, gen_optimiser=gen_optimiser)
+
+    @staticmethod
+    def init_optimiser(name, parameters, lr, l2_weight, momentum=0.0):
+        # Taken from Wilker: https://github.com/probabll/dgm.pt/blob/
+        # 95b5b1eb798b87c3d621e7416cc1c423c076c865/probabll/dgm/opt_utils.py#L64
+        if name is None or name == "adam":
+            cls = optim.Adam
+        elif name == "amsgrad":
+            cls = partial(optim.Adam, amsgrad=True)
+        elif name == "adagrad":
+            cls = optim.Adagrad
+        elif name == "adadelta":
+            cls = optim.Adadelta
+        elif name == "rmsprop":
+            cls = partial(optim.RMSprop, momentum=momentum)
+        elif name == "sgd":
+            cls = optim.SGD
+        else:
+            raise ValueError("Unknown optimizer: %s" % name)
+        return cls(params=parameters, lr=lr, weight_decay=l2_weight)
 
     def shared_step(self, batch):
+        self.vae_model.eval()
+
         x_in, labels = batch[0], batch[1]
 
         x_in = x_in.to(self.device)
@@ -42,6 +70,8 @@ class Trainer:
         return loss_dict
 
     def train_step(self, batch):
+        self.vae_model.train()
+
         for _, o in self.optimisers.items():
             o.zero_grad()
 
@@ -50,6 +80,10 @@ class Trainer:
 
         # Backward
         loss_dict["total_loss"].backward()
+
+        if self.args.max_gradient_norm > 0:
+            torch.nn.utils.clip_grad_norm_(parameters=self.vae_model.parameters(),
+                                           max_norm=self.args.max_gradient_norm, norm_type=float("inf"))
 
         # Step
         for _, o in self.optimisers.items():
@@ -82,6 +116,12 @@ class Trainer:
 
                     if phase == "train":
                         step += 1
+
+                if phase == "valid" and epoch % self.args.eval_ll_every_n_epochs == 0:
+                    self.vae_model.estimate_log_likelihood()
+
+
+            utils.log_mog(self.vae_model, self.args)
 
             epoch += 1
 

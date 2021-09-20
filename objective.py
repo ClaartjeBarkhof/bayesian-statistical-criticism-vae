@@ -5,6 +5,7 @@ import torch.distributions as td
 from pytorch_constrained_opt.constraint import Constraint
 from torch_two_sample import MMDStatistic
 
+
 class Objective(nn.Module):
     """
     This class handles the objective we choose to optimise our deep generative latent variable model with.
@@ -67,17 +68,16 @@ class Objective(nn.Module):
             labels = x_in
 
         # Expected KL from prior to posterior
-        kl_prior_post = self.kl_prior_post(p_z=p_z, q_z_x=q_z_x, z_post=z_post, analytical=True)
-
-        # Expected negative log likelihood under q
-        # TODO: there might be some kind of masking necessary
+        kl_prior_post = self.kl_prior_post(p_z=p_z, q_z_x=q_z_x, batch_size=B, z_post=z_post, analytical=True)
 
         # Reduce all dimensions with sum, except for the batch dimension, average that
         if self.args.decoder_network_type == "conditional_made_decoder":
-            # In case of the MADE, the evaluation is in flattened form.
+            # In case of the MADE, the evaluation is in flattened form
             labels = labels.reshape(B, -1)
 
-        nll = - p_x_z.log_prob(labels).reshape(self.args.batch_size, -1).mean()
+        log_p = p_x_z.log_prob(labels)
+        assert log_p.shape == (B,), "We assume p_x_z.log_prob to return one scalar per data point in the batch"
+        distortion = - log_p.mean()
 
         # Maximum mean discrepancy
         # z_post at this point is [1, B, D]
@@ -85,22 +85,22 @@ class Objective(nn.Module):
 
         total_loss, mdr_loss, mdr_multiplier = None, None, None
         if self.args.objective == "AE":
-            total_loss = nll
+            total_loss = distortion
         elif self.args.objective == "VAE":
-            total_loss = nll + kl_prior_post
+            total_loss = distortion + kl_prior_post
         elif self.args.objective == "BETA-VAE":
-            total_loss = nll + self.args.beta_beta
+            total_loss = distortion + self.args.beta_beta
         elif self.args.objective == "MDR-VAE":
             # the gradients for the constraints are recorded at some other point
             mdr_loss = self.mdr_constraint(kl_prior_post).squeeze()
             mdr_multiplier = self.mdr_constraint.multiplier
-            total_loss = nll + kl_prior_post + mdr_loss
+            total_loss = distortion + kl_prior_post + mdr_loss
         elif self.args.objective == "FB-VAE":
             raise NotImplementedError
         elif self.args.objective == "INFO-VAE":
             # gain = ll - (1 - a)*kl_prior_post - (a + l - 1)*marg_kl
-            # loss = nll + (1 - a)*kl_prior_post + (a + l - 1)*marg_kl
-            total_loss = nll + ((1 - self.args.info_alpha) * kl_prior_post) \
+            # loss = distortion + (1 - a)*kl_prior_post + (a + l - 1)*marg_kl
+            total_loss = distortion + ((1 - self.args.info_alpha) * kl_prior_post) \
                          + ((self.args.info_alpha + self.args.info_lambda - 1) * mmd)
         elif self.args.objective == "LAG-INFO-VAE":
             # https://github.com/ermongroup/lagvae/blob/master/methods/lagvae.py
@@ -111,14 +111,14 @@ class Objective(nn.Module):
             mmd=mmd,
             mdr_loss=mdr_loss,
             mdr_multiplier=mdr_multiplier,
-            nll=nll,
+            distortion=distortion,
             kl_prior_post=kl_prior_post
         )
 
         return loss_dict
 
     @staticmethod
-    def kl_prior_post(p_z, q_z_x, z_post=None, analytical=False):
+    def kl_prior_post(p_z, q_z_x, batch_size, z_post=None, analytical=False):
         """Computes the KL from prior to posterior, either analytically or empirically."""
 
         # A bit of a hack to avoid this kl that raises a NotImplementedError (TODO: make this possible)
@@ -127,16 +127,18 @@ class Objective(nn.Module):
 
         if analytical:
 
-            kl = kl_divergence(q_z_x, p_z).mean()
+            kl = kl_divergence(q_z_x, p_z)
 
         else:
             # [B]
             log_q_z_x = q_z_x.log_prob(z_post)
             log_p_z = p_z.log_prob(z_post)
 
-            kl = (log_q_z_x - log_p_z).mean()
+            kl = (log_q_z_x - log_p_z)
 
-        return kl
+        assert kl.shape == (batch_size,), "We assume kl_divergence to return one scalar per data point in the batch"
+
+        return kl.mean()
 
     def maximum_mean_discrepancy(self, z_post):
         prior_sample = torch.randn(z_post.shape).to(z_post.device)

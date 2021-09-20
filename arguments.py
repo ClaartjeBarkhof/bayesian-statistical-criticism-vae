@@ -37,7 +37,7 @@ def prepare_parser(jupyter=False, print_settings=True):
                         help="The learning rate for the MDR constraint optimiser.")
 
     # INFO-VAE
-    parser.add_argument("--info_alpha", default=1.0, type=float,
+    parser.add_argument("--info_alpha", default=0.0, type=float,
                         help="The alpha parameter in the INFO-VAE objective (Zhao et al., 2017).")
     parser.add_argument("--info_lambda", default=1000.0, type=float,
                         help="The lambda parameter in the INFO-VAE objective (Zhao et al., 2017).")
@@ -48,13 +48,24 @@ def prepare_parser(jupyter=False, print_settings=True):
                         help="Batch size for data loading and training.")
     parser.add_argument("--max_steps", default=int(1e6), type=int,
                         help="Maximum number of train steps in total.")
-    parser.add_argument("--max_epochs", default=10, type=int,
+    parser.add_argument("--max_epochs", default=120, type=int,
                         help="Maximum number of epochs, if -1 no maximum number of epochs is set.")
+    parser.add_argument("--eval_ll_every_n_epochs", default=1, type=int,
+                        help="Every how many epochs to evaluate importance weighted log likelihood.")
 
     # ----------------------------------------------------------------------------------------------------------------
-    # LEARNING RATE
-    parser.add_argument("--lr", default=0.001, type=float,
-                        help="Learning rate.")
+    # OPTIMISATION
+    parser.add_argument("--gen_opt", type=str, default="adam")
+    parser.add_argument("--gen_lr", type=float, default=1e-4)
+    parser.add_argument("--gen_l2_weight", type=float, default=1e-4)
+    parser.add_argument("--gen_momentum", type=int, default=0.0)
+
+    parser.add_argument("--inf_opt", type=str, default="adam")
+    parser.add_argument("--inf_lr", type=float, default=1e-4)
+    parser.add_argument("--inf_l2_weight", type=float, default=1e-4)
+    parser.add_argument("--inf_momentum", type=int, default=0.0)
+
+    parser.add_argument("--max_gradient_norm", type=float, default=1.0)
     # TODO: parser.add_argument("--lr_scheduler", default=False, type=lambda x: bool(distutils.util.strtobool(x)),
     #                     help="Whether or not to use a lr scheduler (default: True).")
 
@@ -63,10 +74,16 @@ def prepare_parser(jupyter=False, print_settings=True):
     parser.add_argument("--latent_dim", default=32, type=int, help="Dimensionality of the latent space.")
     parser.add_argument("--decoder_network_type", default="basic_deconv_decoder", type=str,
                         help="Which architecture / distribution structure to use for decoder, options:"
+                             "  - basic_mlp_decoder"
                              "  - basic_deconv_decoder:"
                              "      p(x|z)"
                              "  - conditional_made_decoder:"
                              "      p(x_d|z, x<d)")
+    parser.add_argument("--encoder_network_type", default="basic_conv_encoder", type=str,
+                        help="Which architecture / distribution structure to use for decoder, options:"
+                             "  - basic_mlp_encoder"
+                             "  - basic_conv_encoder")
+
     # ----------------------------------------------------------------------------------------------------------------
     # DISTRIBUTION TYPES
     # independent_gaussian", conditional_gaussian_made, iaf
@@ -135,10 +152,10 @@ def prepare_parser(jupyter=False, print_settings=True):
 
     # ----------------------------------------------------------------------------------------------------------------
     # CHECKPOINTING
-    parser.add_argument("--checkpoint", default=False, type=lambda x: bool(distutils.util.strtobool(x)),
-                        help="Whether or not to checkpoint (save) the model. (default: False).")
-    parser.add_argument("--checkpoint_every_n_steps", default=10, type=int,
-                        help="Every how many (training) steps to checkpoint (default: 1000).")
+    # parser.add_argument("--checkpoint", default=False, type=lambda x: bool(distutils.util.strtobool(x)),
+    #                     help="Whether or not to checkpoint (save) the model. (default: False).")
+    # parser.add_argument("--checkpoint_every_n_steps", default=10, type=int,
+    #                     help="Every how many (training) steps to checkpoint (default: 1000).")
 
     # ----------------------------------------------------------------------------------------------------------------
     # DISTRIBUTED TRAINING
@@ -152,10 +169,12 @@ def prepare_parser(jupyter=False, print_settings=True):
     # GENERAL
     parser.add_argument("--code_dir", default=get_code_dir(), type=str,
                         help="The name of the code dir, depending on LISA or local.")
+    parser.add_argument("--job_id", default="", type=str,
+                        help="...")
     parser.add_argument("--run_name", default="", type=str,
                         help="Run name that will show up in W&B.")
-    parser.add_argument("--fast_dev_run", default=False, type=lambda x: bool(distutils.util.strtobool(x)),
-                        help="Whether or not to perform a fast_dev_run.")
+    # parser.add_argument("--fast_dev_run", default=False, type=lambda x: bool(distutils.util.strtobool(x)),
+    #                     help="Whether or not to perform a fast_dev_run.")
 
     # TODO: add seed & deterministic
 
@@ -214,15 +233,19 @@ def check_settings(args):
         f"{args.image_dataset_name} is a 1-channel dataset."
 
     # Objective
-    objective_options = ["VAE", "AE", "FB-VAE", "MDR-VAE", "INFO-VAE", "LAG-INFO-VAE"]
+    objective_options = ["VAE", "AE", "FB-VAE", "BETA-VAE", "MDR-VAE", "INFO-VAE", "LAG-INFO-VAE"]
     check_valid_option(args.objective, objective_options, "objective")
 
     if args.objective == "LAG-VAE" or args.objective == "LAG-INFO-VAE":
         raise NotImplementedError
 
     # Decoder network types
-    decoder_network_type_options = ["basic_deconv_decoder", "conditional_made_decoder"]
+    decoder_network_type_options = ["basic_mlp_decoder", "basic_deconv_decoder", "conditional_made_decoder"]
     check_valid_option(args.decoder_network_type, decoder_network_type_options, "decoder_network_type")
+
+    # Encoder network types
+    encoder_network_type_options = ["basic_mlp_encoder", "basic_conv_encoder"]
+    check_valid_option(args.encoder_network_type, encoder_network_type_options, "encoder_network_type")
 
     # Posterior types
     q_z_x_type_options = ["independent_gaussian", "conditional_gaussian_made", "iaf"]

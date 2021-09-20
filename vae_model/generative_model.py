@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.distributions as td
 
-from sylvester_flows.models.layers import GatedConvTranspose2d
+from vae_model.sylvester_flows.models.layers import GatedConvTranspose2d
 from vae_model.distributions import AutoRegressiveDistribution
 from vae_model.made import MADE
 
@@ -39,7 +39,8 @@ class GenerativeModel(nn.Module):
             self.mog_n_components = args.mog_n_components
             self.mix_components = torch.nn.Parameter(torch.rand(self.mog_n_components), requires_grad=True)
             self.component_means = torch.nn.Parameter(torch.randn(self.mog_n_components, self.D), requires_grad=True)
-            self.component_scales = torch.nn.Parameter(torch.abs(torch.randn(self.mog_n_components, self.D)), requires_grad=True)
+            self.component_scales = torch.nn.Parameter(torch.abs(torch.randn(self.mog_n_components, self.D)),
+                                                       requires_grad=True)
 
         self.p_z = self.init_p_z()
 
@@ -58,7 +59,7 @@ class GenerativeModel(nn.Module):
         -> Potentially condition on (a part of) x too, e.g. the prefix: z_post -> p(X|Z=z_post, Y=x<i)
 
         Input:
-            z_post: [B, D]
+            z_post: [S, B, D]
                 samples from the posterior q(z|x)
             x_in: [B, L] (language) or [B, C, W, H] (image)
                 the original input the posterior conditioned on
@@ -66,7 +67,9 @@ class GenerativeModel(nn.Module):
         Output:
             p_x_z_post: [B, L] (language) or or [B, C, W, H] (image), generative output distribution p(X|Z=z_post)
         """
+
         p_x_z_post = self.p_x_z(z_post)
+
         return p_x_z_post
 
     def sample_prior(self, S=1):
@@ -86,18 +89,33 @@ class GenerativeModel(nn.Module):
         return z_prior
 
     def p_x_z(self, z):
+        """
+        Maps z to a distribution p(x|z) via a decoder network.
+
+        Input:
+            z: [S, B, D]
+
+        Returns a distribution-like object with parameters [S, B, ...], reducing ... as dimensions for log_prob
+        """
+
         if self.decoder_network_type == "conditional_made_decoder":
+            # TODO
             p_x_z = self.decoder_network(z)
         else:
-            p_x_z_params = self.decoder_network(z)
+            # In case of 3 dimensional z [S, B, D], reduce S in B for forward
+            p_x_z_params = self.decoder_network(z.reshape(-1, z.shape[-1]))
 
             if self.p_x_z_type == "bernoulli":
-                # p_x_z_params: [B, C, W, H]
-                p_x_z = td.Independent(td.Bernoulli(logits=p_x_z_params), 1)
+                # p_x_z_params: [B*S, C, W, H] -> [S, B, C, W, H]
+                p_x_z_params = p_x_z_params.reshape(z.shape[0], z.shape[-1], self.C, self.image_w_h, self.image_w_h)
+                p_x_z = td.Independent(td.Bernoulli(logits=p_x_z_params), 3)  # reduce last 3 dimensions with log_prob
 
             elif self.p_x_z_type == "multinomial":
-                # image: p_x_z_params: [B, C, num_classes, W, H] -> [B, C, W, H, num_classes]
+                # image: p_x_z_params: [B*S, C, num_classes, W, H] -> [BS, C, num_classes, W, H]
+                p_x_z_params = p_x_z_params.reshape(z.shape[0], z.shape[-1], self.C, self.image_w_h, self.image_w_h)
+                # [B, C, num_classes, W, H] -> [B, C, W, H, num_classes]
                 p_x_z_params = p_x_z_params.permute(0, 1, 3, 4, 2)
+
                 p_x_z = td.Categorical(logits=p_x_z_params)
 
             else:
@@ -108,7 +126,8 @@ class GenerativeModel(nn.Module):
     def init_p_z(self):
         # ISOTROPIC GAUSSIAN
         if self.p_z_type == "isotropic_gaussian":
-            return td.Independent(td.Normal(loc=torch.zeros(self.D, device=self.device), scale=torch.ones(self.D, device=self.device)), 1)
+            return td.Independent(
+                td.Normal(loc=torch.zeros(self.D, device=self.device), scale=torch.ones(self.D, device=self.device)), 1)
 
         # MIXTURE OF GAUSSIANS
         elif self.p_z_type == "mog":
@@ -123,10 +142,10 @@ class GenerativeModel(nn.Module):
     def get_decoder_network(self):
         if self.decoder_network_type == "basic_deconv_decoder":
             return DecoderGatedConvolutionBlock(args=self.args)
-
+        elif self.decoder_network_type == "basic_mlp_decoder":
+            return DecoderMLPBlock(args=self.args)
         elif self.decoder_network_type == "conditional_made_decoder":
             return ConditionalBernoulliBlockMADE(args=self.args)
-
         else:
             raise NotImplementedError
 
@@ -143,7 +162,7 @@ class ConditionalBernoulliBlockMADE(nn.Module):
         act = nn.ReLU()
 
         self.made = MADE(self.X_dim, hiddens, self.X_dim, natural_ordering=natural_ordering,
-                         context_size=self.D, hidden_activation=act)  # no additional context here
+                         context_size=self.D, hidden_activation=act)
 
     def forward(self, z):
         # Placeholder distribution object
@@ -155,11 +174,14 @@ class ConditionalBernoulliBlockMADE(nn.Module):
 class DecoderGatedConvolutionBlock(nn.Module):
     """
     Maps z -> p_x_z_params
+        In case of Bernoulli these are logits [B, C, W, H]
+        In case of Multinomial these are logits [B, C, num_classes=256, W, H]
 
     # This code is adapted from Rianne van de Berg's code (sylvester_flows submodule):
     https://github.com/riannevdberg/sylvester-flows/blob/32dde9b7d696fee94f946a338182e542779eecfe/models/VAE.py
 
     """
+
     def __init__(self, args):
         super(DecoderGatedConvolutionBlock, self).__init__()
 
@@ -219,5 +241,55 @@ class DecoderGatedConvolutionBlock(nn.Module):
         elif self.C == 3:
             print("Code not checked for 3-channel input, implement something with reshape here.")
             raise NotImplementedError
+
+        return p_x_z_params
+
+
+class DecoderMLPBlock(nn.Module):
+    """
+        Maps z -> p_x_z_params.
+            In case of Bernoulli these are logits [B, C, W, H]
+            In case of Multinomial these are logits [B, C, num_classes=256, W, H]
+
+    """
+
+    def __init__(self, args):
+        super(DecoderMLPBlock, self).__init__()
+
+        self.data_distribution = args.data_distribution
+        if self.data_distribution == "bernoulli":
+            self.num_classes = 1
+        elif self.data_distribution == "multinomial":
+            self.num_classes = 256
+        else:
+            raise NotImplementedError
+        self.image_w_h = args.image_w_h
+        self.D = args.latent_dim
+        self.C = args.n_channels
+
+        # z_in -> 500 --> 500 -> image_w*image_h*C
+        self.decoder_mlp_block = nn.Sequential(
+            nn.Linear(in_features=self.D, out_features=500),
+            nn.ReLU(),
+            nn.Linear(in_features=500, out_features=500),
+            nn.ReLU(),
+            nn.Linear(500, self.image_w_h * self.image_w_h * self.C * self.num_classes)
+        )
+
+    def forward(self, z):
+        # Reshape to [B, image_w*image_h*C]
+        pred_flat = self.decoder_mlp_block(z)
+
+        # Bernoulli: [B, C, image_w_h, image_w_h] (4 dim)
+        if self.data_distribution == "bernoulli":
+            assert pred_flat.shape == (z.shape[0], self.C * self.image_w_h * self.image_w_h), \
+                "Expected the predictions to be of shape [B, C*W*H]"
+            p_x_z_params = pred_flat.reshape(z.shape[0], self.C, self.image_w_h, self.image_w_h)
+
+        # Multinomial: [B, C, num_classes, W, H]
+        else:
+            assert pred_flat.shape == (z.shape[0], self.C * self.image_w_h * self.image_w_h * self.num_classes), \
+                "Expected the predictions to be of shape [B, C*num_classes*W*H]"
+            p_x_z_params = pred_flat.reshape(z.shape[0], self.C, self.num_classes, self.image_w_h, self.image_w_h)
 
         return p_x_z_params

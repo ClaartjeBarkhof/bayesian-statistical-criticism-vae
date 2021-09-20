@@ -27,6 +27,7 @@ class InferenceModel(nn.Module):
 
         # NETWORK
         # an encoder that maps x to params of q_z_x
+        self.encoder_network_type = args.encoder_network_type
         self.encoder_network = self.get_encoder_network()
 
         # POSTERIOR DISTRIBUTION
@@ -39,7 +40,12 @@ class InferenceModel(nn.Module):
         """Retrieves a network block for data set type language (transformer block) or image (convolutional block)"""
         # IMAGE: bernoulli or categorical data distribution
         if self.image_or_language == "image":
-            return EncoderGatedConvolutionBlock(args=self.args)
+            if self.encoder_network_type == "basic_mlp_encoder":
+                return EncoderMLPBlock(args=self.args)
+            elif self.encoder_network_type == "basic_conv_encoder":
+                return EncoderGatedConvolutionBlock(args=self.args)
+            else:
+                raise NotImplementedError
         # LANGUAGE: categorical
         else:
             # TODO: implement for language
@@ -67,9 +73,12 @@ class InferenceModel(nn.Module):
 
     def forward(self, x_in, n_samples=1):
         """Infers a distribution and samples from it with the reparameterisation trick."""
-        # [S, B, D]
+        # [B, D]
         q_z_x = self.infer_q_z_x(x_in)
-        z_post = q_z_x.rsample()  # TODO: sample_shape=(n_samples,)
+
+        # [S, B, D]
+        z_post = q_z_x.rsample(sample_shape=(n_samples,))
+
         return q_z_x, z_post
 
 
@@ -90,6 +99,9 @@ class IndependentGaussianBlock(nn.Module):
         scale = self.scale_layer(q_z_x_params)
 
         # [B, D] (D independent Gaussians)
+        assert mean.shape == (q_z_x_params.shape[0], self.D), "mean is supposed to be of shape [B, D]"
+        assert scale.shape == (q_z_x_params.shape[0], self.D), "scale is supposed to be of shape [B, D]"
+
         q_z_x = td.Independent(td.Normal(loc=mean, scale=scale), 1)
 
         return q_z_x
@@ -173,12 +185,6 @@ class EncoderGatedConvolutionBlock(nn.Module):
                 GatedConv2d(64, 64, 5, 1, 2),
                 GatedConv2d(64, 256, last_kernel_size, 1, 0)
             )
-            # TODO: Rianne has a Hardtanh actiation for her q_z_var:
-            #     q_z_var = nn.Sequential(
-            #         nn.Linear(256, self.D),
-            #         nn.Softplus(),
-            #         nn.Hardtanh(min_val=0.01, max_val=7.)
-            #     ), why was that there?
         else:
             raise ValueError(f"Data distribution type not implemented: {self.data_distribution}.")
 
@@ -191,3 +197,24 @@ class EncoderGatedConvolutionBlock(nn.Module):
         q_z_x_params = q_z_x_params.squeeze(-1).squeeze(-1)
 
         return q_z_x_params
+
+
+class EncoderMLPBlock(nn.Module):
+    def __init__(self, args):
+        super(EncoderMLPBlock, self).__init__()
+
+        self.image_w_h = args.image_w_h
+        self.C = args.n_channels
+
+        # in -> 500 --> 256 -> q_z_x block
+        self.encoder_mlp_block = nn.Sequential(
+            nn.Linear(in_features=self.image_w_h*self.image_w_h*self.C, out_features=500),
+            nn.ReLU(),
+            nn.Linear(in_features=500, out_features=256),
+            nn.ReLU()
+        )
+
+    def forward(self, x_in):
+        # reshape to [B, image_w*image_h*C]
+        x_in_flat = x_in.reshape(x_in.shape[0], -1)
+        return self.encoder_mlp_block(x_in_flat)

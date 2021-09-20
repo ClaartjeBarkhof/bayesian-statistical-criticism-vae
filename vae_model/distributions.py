@@ -21,46 +21,96 @@ class AutoRegressiveDistribution(nn.Module):
         self.state = state
 
     def log_prob(self, x_z):
+        """
 
-        #print("log_prob x_z.shape", x_z.shape)
+            x_z may be 2-dimensional in a normal forward in the encoder of x
+            context may be 3 dimensional after a
+
+            context may be 3-dimensional in a multi-sample forward in the decoder of z: [S, B, D]
+
+
+        """
+        x_z_shape = x_z.shape
+        context_shape = self.context.shape
+
+        # multi-sample z [S, B, D]
+        if self.context.dim() == 3:
+            # [S, B, D]
+            (S, B, D)  = context_shape
+            if S > 1:
+                # [S, B, D] -> [S*B, D]
+                context = self.context.reshape(-1, D)
+                # [B, D] -> [S*B, D]
+                # Eg: [x_1, x_2, x_1, x_2, x_1, x_2] for 3 samples of batch of 2 elements
+                x_z = x_z.repeat(S, 1, 1).reshape(S*B, -1)
+            # [1, B, D]
+            else:
+                context = self.context.squeeze(0)
+        else:
+            context = self.context
 
         if self.state is not None:
             params = self.state[1:]
         else:
-            made_out_params = self.made(x_z, context=self.context)
+            made_out_params = self.made(x_z, context=context)
+
+            # All should be [B, D]
             if self.dist_type == "gaussian":
+
                 params_split = torch.split(made_out_params, 2, dim=1)
                 mean, pre_scale = params_split[0], params_split[1]
+
                 scale = F.softplus(pre_scale)
                 params = (mean, scale)  # mean, scale for Gaussian
+
             else:
+
+                # [S*B, self.x_z_dim]
                 params = (made_out_params,)  # logits for Bernoulli
-                #print("params", params)
 
         self.state = (x_z,) + params
         #print("self.state", self.state)
 
+        # For latent space
         if self.dist_type == "gaussian":
             mean, scale = params
             # careful that the distribution itself is not independent, but at this point it is valid to use for log_prob
             # log_prob = log q_z_x
+            # [B, D] (D independent Gaussians)
+            assert mean.shape == (self.context.shape[0], self.D), "mean is supposed to be of shape [B, D]"
+            assert scale.shape == (self.context.shape[0], self.D), "scale is supposed to be of shape [B, D]"
             log_prob = td.Independent(td.Normal(loc=mean, scale=scale), 1).log_prob(x_z)
-        else:
+            assert log_prob.shape == (self.context.shape[0],), "log_prob is supposed to be of shape [B,]"
+
+        # For output space
+        elif self.dist_type == "bernoulli":
             logits = params[0]
-            #print("logits.shape", logits.shape)
+            # Reintroduce the sample dimension [S*B, -1] -> [S, B, -1]
+            if len(x_z_shape) == 3:
+                logits = logits.reshape(x_z_shape[0], x_z_shape[1], -1)
             # log_prob = log p_x_z
+            # here the data dim is flattened, hence reinterpreted_batch_ndims=1
             log_prob = td.Independent(td.Bernoulli(logits=logits), 1).log_prob(x_z)
+            assert log_prob.shape == (self.context.shape[0],), "log_prob is supposed to be of shape [B,]"
+
+        else:
+            raise NotImplementedError
 
         return log_prob
 
-
-    def rsample(self):
+    def rsample(self, sample_shape=None):
         # TODO: multi rsample?
+        if sample_shape is not None:
+            assert len(sample_shape) == 1, "only accepting 1 dimensional shape for sample_shape (S,)"
         assert self.dist_type == "gaussian", "This functionality is only implemented for the Gaussian case."
 
         B = self.context.shape[0]
 
-        z_sample = torch.zeros((B, self.x_z_dim), device=self.context.device)
+        if sample_shape is not None:
+            z_sample = torch.zeros((sample_shape[0], B, self.x_z_dim), device=self.context.device)
+        else:
+            z_sample = torch.zeros((B, self.x_z_dim), device=self.context.device)
+
         mu_inferred, scale_inferred = [], []
 
         for i in range(self.x_z_dim):
@@ -75,11 +125,15 @@ class AutoRegressiveDistribution(nn.Module):
             mu_inferred.append(mu_i)
             scale_inferred.append(scale_i)
 
-            z_sample[:, i] = td.Normal(loc=mu_i, scale=scale_i).rsample()
+            # [S, B]
+            z_i = td.Normal(loc=mu_i, scale=scale_i).rsample(sample_shape=sample_shape)
+            z_sample[:, :, i] = z_i
 
+        # [B, D]
         mu_inferred = torch.stack(mu_inferred, dim=1)
         scale_inferred = torch.stack(scale_inferred, dim=1)
 
+        # [S, B, D], [B, D], [B, D]
         self.state = (z_sample, mu_inferred, scale_inferred)
 
         return z_sample

@@ -14,20 +14,23 @@ def main():
 
     # config.q_z_x_type = "conditional_gaussian_made"  # "iaf" #"independent_gaussian" # conditional_gaussian_made
 
-    for objective in ["VAE", "AE", "BETA-VAE", "MDR-VAE", "INFO-VAE"]:
+    # for objective in ["VAE", "AE", "BETA-VAE", "MDR-VAE", "INFO-VAE"]:
 
-        config.objective = objective
+    config.objective = "VAE"
 
-        for dataset_name, data_dist in zip(["bmnist", "fmnist", "mnist"], ["bernoulli", "multinomial", "multinomial"]):
+    for dataset_name, data_dist in zip(["bmnist", "fmnist", "mnist"], ["bernoulli", "multinomial", "multinomial"]):
 
-            config.image_dataset_name = dataset_name
-            config.data_distribution = data_dist
+        config.image_dataset_name = dataset_name
+        config.data_distribution = data_dist
 
-            dataset = ImageDataset(args=config)
-            train_loader = dataset.train_loader()
+        dataset = ImageDataset(args=config)
+        train_loader = dataset.train_loader()
 
-            for decoder_network_type in ["basic_deconv_decoder", "conditional_made_decoder"]:
-                config.decoder_network_type = decoder_network_type
+        for decoder_network_type in ["basic_mlp_decoder", "basic_deconv_decoder", "conditional_made_decoder"]:
+            config.decoder_network_type = decoder_network_type
+
+            for encoder_network_type in ["basic_mlp_encoder", "basic_conv_encoder"]:
+                config.encoder_network_type = encoder_network_type
 
                 for q_z_x_type in ["conditional_gaussian_made", "independent_gaussian"]:
 
@@ -37,7 +40,8 @@ def main():
                         config.p_z_type = p_z_type
                         config.mog_n_components = 3
 
-                        print(f"{counter} | objective: {objective} dataset: {dataset_name.upper()}, data dist {data_dist}, decoder_network_type: {decoder_network_type}, q_z_x_type {q_z_x_type}, p_z_type {p_z_type}")
+                        #objective: {objective}
+                        print(f"{counter} | dataset: {dataset_name.upper()}, data dist {data_dist}, encoder_network_type: {encoder_network_type}, decoder_network_type: {decoder_network_type}, q_z_x_type {q_z_x_type}, p_z_type {p_z_type}")
                         if decoder_network_type == "conditional_made_decoder" and data_dist == "multinomial":
                             print("This combo is not implemented yet.")
                             continue
@@ -48,7 +52,7 @@ def main():
                             print("X input shape", X.shape)
                             #vae(X)
 
-                            vae.training_step((X, y), 0)
+                            vae(X)
 
                             break
 

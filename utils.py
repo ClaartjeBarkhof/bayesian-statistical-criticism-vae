@@ -5,8 +5,16 @@ import torch
 def init_logging(vae_model, args):
     """Initialise W&B logging."""
     print("W&B INIT: RUN NAME", args.run_name)
-    wandb.init(name=args.run_name, project=args.wandb_project, config=args)
+    wandb.init(project=args.wandb_project, name=args.run_name, entity='fall-2021-vae-claartje-wilker', config=args)
+    # wandb.init(name=args.run_name, project=args.wandb_project, config=args)
     # wandb.watch(vae_model) this gives an error on LISA
+
+def log_mog(vae_model, args):
+    if args.p_z_type == "mog":
+        mix = vae_model.gen_model.mix_components.data  # [n_comp]
+        mean = vae_model.gen_model.component_means.data  # [n_comp, D]
+        scale = vae_model.gen_model.component_scales.data # [n_comp, D]
+
 
 
 def clean_loss_dict_log_print(loss_dict):
