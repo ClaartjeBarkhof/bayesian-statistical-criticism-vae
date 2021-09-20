@@ -133,7 +133,10 @@ class AutoRegressiveDistribution(nn.Module):
         for i in range(self.x_z_dim):
             # [S*B, D*2]
             z_reshape = z_sample.reshape(S*B, D)
-            mus_prescales = self.made(z_reshape, context=self.context)
+            context_x = self.context.repeat(S, 1, 1).reshape(S * B, -1)
+            print("z_reshape.shape, self.context.shape, context_x.shape", z_reshape.shape, context_x.shape)
+            mus_prescales = self.made(z_reshape, context=context_x)
+            # mus_prescales = torch.randn((z_reshape.shape[0], int(z_reshape.shape[1]*2)))
             print("mu_prescales.shape", mus_prescales.shape)
             mus_prescales = mus_prescales.reshape(S, B, D*2)
             print("mu_prescales.shape (after reshape)", mus_prescales.shape)
@@ -214,6 +217,8 @@ class AutoRegressiveDistribution(nn.Module):
 
 @td.register_kl(AutoRegressiveDistribution, AutoRegressiveDistribution)
 def _kl(p, q):
+    print("XXXX KL 1")
+
     assert p.dist_type == q.dist_type == "gaussian", "Both AutoRegressiveDistributions should be Gaussian."
 
     if p.params is None:
@@ -234,6 +239,7 @@ def _kl(p, q):
 
 @td.register_kl(AutoRegressiveDistribution, td.Normal)
 def _kl(p, q):
+    print("XXXX KL 2")
     assert p.dist_type == "gaussian", "The AutoRegressiveDistributions should be Gaussian."
 
     if p.params is None:
@@ -248,6 +254,7 @@ def _kl(p, q):
 
 @td.register_kl(AutoRegressiveDistribution, td.Distribution)
 def _kl(p, q):
+    print("XXXX KL 3")
     if p.params is None:
         print("r_sample")
         z = p.rsample()

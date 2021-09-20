@@ -79,9 +79,9 @@ class Trainer:
         # Backward
         loss_dict["total_loss"].backward()
 
-        # if self.args.max_gradient_norm > 0:
-        #     torch.nn.utils.clip_grad_norm_(parameters=self.vae_model.parameters(),
-        #                                    max_norm=self.args.max_gradient_norm, norm_type=float("inf"))
+        if self.args.max_gradient_norm > 0:
+            torch.nn.utils.clip_grad_norm_(parameters=self.vae_model.parameters(),
+                                           max_norm=self.args.max_gradient_norm, norm_type=float("inf"))
 
         # Step
         for _, o in self.optimisers.items():

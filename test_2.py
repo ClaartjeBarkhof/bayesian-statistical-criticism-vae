@@ -17,48 +17,50 @@ def main():
 
     config.objective = "VAE"
 
-    for dataset_name, data_dist in zip(["bmnist", "mnist"], ["bernoulli", "multinomial"]):
-        print(dataset_name)
-        config.image_dataset_name = dataset_name
-        config.data_distribution = data_dist
+    # for dataset_name, data_dist in zip(["bmnist", "mnist"], ["bernoulli", "multinomial"]):
+    dataset_name = "bmnist"
+    data_dist = "bernoulli"
+    print(dataset_name)
+    config.image_dataset_name = dataset_name
+    config.data_distribution = data_dist
 
-        dataset = ImageDataset(args=config)
-        train_loader = dataset.train_loader()
+    dataset = ImageDataset(args=config)
+    train_loader = dataset.train_loader()
 
-        for decoder_network_type in ["basic_mlp_decoder", "basic_deconv_decoder", "conditional_made_decoder"]:
-            config.decoder_network_type = decoder_network_type
+    for decoder_network_type in ["basic_deconv_decoder"]: # , "conditional_made_decoder", "basic_mlp_decoder"
+        config.decoder_network_type = decoder_network_type
 
-            for encoder_network_type in ["basic_mlp_encoder", "basic_conv_encoder"]:
-                config.encoder_network_type = encoder_network_type
+        for encoder_network_type in ["basic_mlp_encoder"]: # , "basic_conv_encoder"
+            config.encoder_network_type = encoder_network_type
 
-                for q_z_x_type in ["conditional_gaussian_made", "independent_gaussian"]:
+            for q_z_x_type in ["conditional_gaussian_made"]: #,"conditional_gaussian_made" "independent_gaussian"
 
-                    config.q_z_x_type = q_z_x_type
+                config.q_z_x_type = q_z_x_type
 
-                    for p_z_type in ["isotropic_gaussian", "mog"]:
-                        config.p_z_type = p_z_type
-                        config.mog_n_components = 3
+                for p_z_type in ["isotropic_gaussian"]: #, "mog"
+                    config.p_z_type = p_z_type
+                    config.mog_n_components = 3
 
-                        print(f"{counter} | dataset: {dataset_name.upper()}, data dist {data_dist}, encoder_network_type: {encoder_network_type}, decoder_network_type: {decoder_network_type}, q_z_x_type {q_z_x_type}, p_z_type {p_z_type}")
-                        if decoder_network_type == "conditional_made_decoder" and data_dist == "multinomial":
-                            print("This combo is not implemented yet.")
-                            continue
+                    print(f"{counter} | dataset: {dataset_name.upper()}, data dist {data_dist}, encoder_network_type: {encoder_network_type}, decoder_network_type: {decoder_network_type}, q_z_x_type {q_z_x_type}, p_z_type {p_z_type}")
+                    if decoder_network_type == "conditional_made_decoder" and data_dist == "multinomial":
+                        print("This combo is not implemented yet.")
+                        continue
 
-                        vae = VaeModel(args=config)
-                        trainer = Trainer(args=config, dataset=dataset, vae_model=vae, device="cpu")
+                    vae = VaeModel(args=config)
+                    trainer = Trainer(args=config, dataset=dataset, vae_model=vae, device="cpu")
 
-                        with torch.autograd.set_detect_anomaly(True):
-                            for X, y in train_loader:
-                                print("X input shape", X.shape)
+                    with torch.autograd.set_detect_anomaly(True):
+                        for X, y in train_loader:
+                            print("X input shape", X.shape)
 
-                                #vae(X)
-                                loss_dict = trainer.train_step(X)
+                            #vae(X)
+                            loss_dict = trainer.train_step(X)
 
-                                break
+                            break
 
-                        print("\n\n")
+                    print("\n\n")
 
-                        counter += 1
+                    counter += 1
 
 if __name__ == "__main__":
     main()

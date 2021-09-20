@@ -94,22 +94,28 @@ class Objective(nn.Module):
         total_loss, mdr_loss, mdr_multiplier = None, None, None
         if self.args.objective == "AE":
             total_loss = distortion
+
         elif self.args.objective == "VAE":
-            total_loss = kl_prior_post #distortion + kl_prior_post
+            total_loss = distortion + kl_prior_post
+
         elif self.args.objective == "BETA-VAE":
             total_loss = distortion + self.args.beta_beta
+
         elif self.args.objective == "MDR-VAE":
             # the gradients for the constraints are recorded at some other point
             mdr_loss = self.mdr_constraint(kl_prior_post).squeeze()
             mdr_multiplier = self.mdr_constraint.multiplier
             total_loss = distortion + kl_prior_post + mdr_loss
+
         elif self.args.objective == "FB-VAE":
             raise NotImplementedError
+
         elif self.args.objective == "INFO-VAE":
             # gain = ll - (1 - a)*kl_prior_post - (a + l - 1)*marg_kl
             # loss = distortion + (1 - a)*kl_prior_post + (a + l - 1)*marg_kl
             total_loss = distortion + ((1 - self.args.info_alpha) * kl_prior_post) \
                          + ((self.args.info_alpha + self.args.info_lambda - 1) * mmd)
+
         elif self.args.objective == "LAG-INFO-VAE":
             # https://github.com/ermongroup/lagvae/blob/master/methods/lagvae.py
             raise NotImplementedError
@@ -131,11 +137,14 @@ class Objective(nn.Module):
 
         print("kl_prior_post: q_z_x", q_z_x)
         print("kl_prior_post: z_post.shape", z_post.shape)
+        print("n_samples, batch_size", n_samples, batch_size)
+        print("prior", p_z)
 
         # A bit of a hack to avoid this kl that raises a NotImplementedError (TODO: make this possible)
         if isinstance(p_z, td.MixtureSameFamily):
             analytical = False
 
+        analytical = False
         if analytical:
             print("ANALYTICAL")
 
@@ -143,13 +152,16 @@ class Objective(nn.Module):
 
         else:
             print("NOT ANALYTICAL")
-            # [B]
-            log_q_z_x = q_z_x.log_prob(z_post)
-            log_p_z = p_z.log_prob(z_post)
+            # [S, B] -> [B]
+            log_q_z_x = q_z_x.log_prob(z_post).mean(dim=0)
+            log_p_z = p_z.log_prob(z_post).mean(dim=0)
+
+            print("log_q_z_x.shape, log_p_z.shape", log_q_z_x.shape, log_p_z.shape)
 
             kl = (log_q_z_x - log_p_z)
 
-        assert kl.shape == (n_samples, batch_size), "We assume kl_divergence to return one scalar per data point in the batch"
+        assert kl.shape == (batch_size, ), \
+            f"We assume kl_divergence to return one scalar per data point in the batch, current shape: {kl.shape}"
 
         return kl.mean()
 

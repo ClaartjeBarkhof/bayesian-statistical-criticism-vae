@@ -107,6 +107,7 @@ class IndependentGaussianBlock(nn.Module):
 
         return q_z_x
 
+
 class ConditionalGaussianBlockMADE(nn.Module):
     def __init__(self, args):
         super(ConditionalGaussianBlockMADE, self).__init__()
