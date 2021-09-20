@@ -57,10 +57,6 @@ class Objective(nn.Module):
 
         (S, B, D) = z_post.shape
 
-        print("COMPUTE LOSS")
-        print("p_x_z", p_x_z)
-        print("z_post.shape", z_post.shape)
-
         if self.image_or_language == "image" and self.data_distribution == "multinomial":
             # map 0, 1 range to 0 256 integer range, code taken from:
             # https://github.com/riannevdberg/sylvester-flows/blob/ \
@@ -72,19 +68,16 @@ class Objective(nn.Module):
             labels = x_in
 
         # Expected KL from prior to posterior
-        kl_prior_post = self.kl_prior_post(p_z=p_z, q_z_x=q_z_x, n_samples=S, batch_size=B, z_post=z_post, analytical=True)
+        kl_prior_post = self.kl_prior_post(p_z=p_z, q_z_x=q_z_x, batch_size=B,
+                                           z_post=z_post, analytical=True)
 
-        # Reduce all dimensions with sum, except for the batch dimension, average that
         if self.args.decoder_network_type == "conditional_made_decoder":
             # In case of the MADE, the evaluation is in flattened form
             labels = labels.reshape(B, -1)
 
-        print("Labels.shape", labels.shape)
-
+        # Distortion
         log_p_x_z = p_x_z.log_prob(labels)
-        print("log_p_x_z.shape", log_p_x_z.shape)
-        assert log_p_x_z.shape == (S, B), \
-            "We assume p_x_z.log_prob to return one scalar sample per per data point in the batch, shape must be (S, B)"
+        assert log_p_x_z.shape == (S, B), f"we assume p_x_z.log_prob shape to be be (S, B), currently {log_p_x_z.shape}"
         distortion = - log_p_x_z.mean()
 
         # Maximum mean discrepancy
@@ -92,13 +85,17 @@ class Objective(nn.Module):
         mmd = self.maximum_mean_discrepancy(z_post.squeeze(0))
 
         total_loss, mdr_loss, mdr_multiplier = None, None, None
+
         if self.args.objective == "AE":
+            #
             total_loss = distortion
 
         elif self.args.objective == "VAE":
+            #
             total_loss = distortion + kl_prior_post
 
         elif self.args.objective == "BETA-VAE":
+            #
             total_loss = distortion + self.args.beta_beta
 
         elif self.args.objective == "MDR-VAE":
@@ -108,6 +105,7 @@ class Objective(nn.Module):
             total_loss = distortion + kl_prior_post + mdr_loss
 
         elif self.args.objective == "FB-VAE":
+            # TODO:
             raise NotImplementedError
 
         elif self.args.objective == "INFO-VAE":
@@ -117,7 +115,7 @@ class Objective(nn.Module):
                          + ((self.args.info_alpha + self.args.info_lambda - 1) * mmd)
 
         elif self.args.objective == "LAG-INFO-VAE":
-            # https://github.com/ermongroup/lagvae/blob/master/methods/lagvae.py
+            # TODO: https://github.com/ermongroup/lagvae/blob/master/methods/lagvae.py
             raise NotImplementedError
 
         loss_dict = dict(
@@ -132,31 +130,20 @@ class Objective(nn.Module):
         return loss_dict
 
     @staticmethod
-    def kl_prior_post(p_z, q_z_x, batch_size, n_samples, z_post=None, analytical=False):
+    def kl_prior_post(p_z, q_z_x, batch_size, z_post=None, analytical=False):
         """Computes the KL from prior to posterior, either analytically or empirically."""
-
-        print("kl_prior_post: q_z_x", q_z_x)
-        print("kl_prior_post: z_post.shape", z_post.shape)
-        print("n_samples, batch_size", n_samples, batch_size)
-        print("prior", p_z)
 
         # A bit of a hack to avoid this kl that raises a NotImplementedError (TODO: make this possible)
         if isinstance(p_z, td.MixtureSameFamily):
             analytical = False
 
-        analytical = False
         if analytical:
-            print("ANALYTICAL")
-
             kl = kl_divergence(q_z_x, p_z)
 
         else:
-            print("NOT ANALYTICAL")
             # [S, B] -> [B]
             log_q_z_x = q_z_x.log_prob(z_post).mean(dim=0)
             log_p_z = p_z.log_prob(z_post).mean(dim=0)
-
-            print("log_q_z_x.shape, log_p_z.shape", log_q_z_x.shape, log_p_z.shape)
 
             kl = (log_q_z_x - log_p_z)
 
@@ -165,9 +152,12 @@ class Objective(nn.Module):
 
         return kl.mean()
 
-    def maximum_mean_discrepancy(self, z_post):
-        prior_sample = torch.randn(z_post.shape).to(z_post.device)
-        alphas = [0.1 * i for i in range(5)] # TODO: no clue for these...
+    @staticmethod
+    def maximum_mean_discrepancy(z_post):
+        # [S, B, D] -> [B, D]
+        z_post = z_post.reshape(-1, z_post.shape[-1])
+        prior_sample = torch.randn_like(z_post)  # .to(z_post.device)
+        alphas = [0.1 * i for i in range(5)]  # TODO: no clue for these...
 
         n_1, n_2 = len(z_post), len(prior_sample)
         MMD_stat = MMDStatistic(n_1, n_2)

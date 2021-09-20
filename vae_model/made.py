@@ -128,10 +128,6 @@ class MADE(nn.Module):
             l.set_mask(m)
 
     def forward(self, x, context=None):
-        #print("x.shape, context.shape", x.shape, context.shape)
-        #print("nin", self.nin, "nout", self.nout, "context size", self.context_size)
-        #exit()
-
         if self.ctxt_net is None:
             return self.net(x)
         else:

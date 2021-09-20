@@ -27,13 +27,13 @@ def main():
     dataset = ImageDataset(args=config)
     train_loader = dataset.train_loader()
 
-    for decoder_network_type in ["basic_deconv_decoder"]: # , "conditional_made_decoder", "basic_mlp_decoder"
+    for decoder_network_type in ["basic_mlp_decoder"]: # , "conditional_made_decoder", "basic_mlp_decoder"
         config.decoder_network_type = decoder_network_type
 
         for encoder_network_type in ["basic_mlp_encoder"]: # , "basic_conv_encoder"
             config.encoder_network_type = encoder_network_type
 
-            for q_z_x_type in ["conditional_gaussian_made"]: #,"conditional_gaussian_made" "independent_gaussian"
+            for q_z_x_type in ["independent_gaussian"]: #,"conditional_gaussian_made" "independent_gaussian"
 
                 config.q_z_x_type = q_z_x_type
 
@@ -50,13 +50,14 @@ def main():
                     trainer = Trainer(args=config, dataset=dataset, vae_model=vae, device="cpu")
 
                     with torch.autograd.set_detect_anomaly(True):
-                        for X, y in train_loader:
-                            print("X input shape", X.shape)
+                        for i, (X, y) in enumerate(train_loader):
+                            print(f"{i} X input shape", X.shape)
 
                             #vae(X)
                             loss_dict = trainer.train_step(X)
 
-                            break
+                            if i == 3:
+                                break
 
                     print("\n\n")
 

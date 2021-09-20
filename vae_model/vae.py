@@ -23,7 +23,6 @@ class VaeModel(nn.Module):
     def forward(self, x_in):
         # Infer the approximate posterior q(z|x) and sample from it to obtain z_post
         # [B, D], [S, B, D]
-        print("vae.forward x_in.shape", x_in.shape)
         q_z_x, z_post = self.inf_model(x_in=x_in, n_samples=1)
         assert z_post.dim() == 3, "samples from the posterior must be 3D (S, B, D)"
 
@@ -43,7 +42,7 @@ class VaeModel(nn.Module):
                 x_in = batch[0]
                 x_in = x_in.to(self.device)
 
-                q_z_x, z_post, p_z, p_x_z = self.vae_model.forward(x_in)
+                q_z_x, z_post, p_z, p_x_z = self.vae_model(x_in)
 
     @staticmethod
     def iw_log_p_x(log_p_x_z, log_p_z, log_q_z_x):

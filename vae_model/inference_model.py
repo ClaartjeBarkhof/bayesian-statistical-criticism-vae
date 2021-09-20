@@ -67,7 +67,6 @@ class InferenceModel(nn.Module):
         """Infers a distribution from encoding the input x_in."""
         # [B, 256]
         q_z_x_params = self.q_z_nn(x_in)
-        print("q_z_x_params", q_z_x_params.shape)
         q_z_x = self.q_z_x_block(q_z_x_params)
 
         return q_z_x
@@ -85,7 +84,6 @@ class InferenceModel(nn.Module):
 
 # --------------------------------------------------------------------------------------------------------------------
 # POSTERIOR DISTRIBUTION BLOCKS
-
 class IndependentGaussianBlock(nn.Module):
     def __init__(self, args):
         super(IndependentGaussianBlock, self).__init__()
@@ -113,14 +111,13 @@ class ConditionalGaussianBlockMADE(nn.Module):
         super(ConditionalGaussianBlockMADE, self).__init__()
 
         self.D = args.latent_dim
-        # self.mapping_layer = nn.Linear(256, self.D)
 
         hiddens = [200, 220]
 
         natural_ordering = True
         act = nn.ReLU()
 
-        self.made = MADE(self.D, hiddens, int(self.D * 2), natural_ordering=natural_ordering,
+        self.made = MADE(nin=self.D, hidden_sizes=hiddens, nout=int(self.D * 2), natural_ordering=natural_ordering,
                          context_size=256, hidden_activation=act)  # no additional context here
 
     def forward(self, q_z_x_params):
@@ -217,8 +214,8 @@ class EncoderMLPBlock(nn.Module):
         )
 
     def forward(self, x_in):
-        # reshape to [B, image_w*image_h*C]
-        print("x_in.shape", x_in.shape)
+        # reshape image to [B, image_w*image_h*C]
         x_in_flat = x_in.reshape(x_in.shape[0], -1)
-        print("x_in_flat.shape", x_in_flat.shape)
-        return self.encoder_mlp_block(x_in_flat)
+        q_z_x_params = self.encoder_mlp_block(x_in_flat)
+
+        return q_z_x_params

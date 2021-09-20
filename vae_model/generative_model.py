@@ -98,16 +98,10 @@ class GenerativeModel(nn.Module):
         Returns a distribution-like object with parameters [S, B, ...], reducing ... as dimensions for log_prob
         """
 
-        print("in generative model.p_x_z, z.shape", z.shape)
-
         if self.decoder_network_type == "conditional_made_decoder":
-            print("-> gen_model.forward if conditional_made_decoder")
-
             p_x_z = self.decoder_network(z)
 
         else:
-            print("-> gen_model.forward if NOT conditional_made_decoder")
-
             # Z [S, B, D], reduce S in B for forward
             (S, B, D) = z.shape
             p_x_z_params = self.decoder_network(z.reshape(-1, z.shape[-1]))

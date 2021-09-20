@@ -99,12 +99,12 @@ class Trainer:
         for epoch in range(1000):
             for phase in ["train", "valid"]:
                 for batch_idx, batch in enumerate(self.data_loaders[phase]):
-                    X, _ = batch
+                    x_in, _ = batch
 
                     if phase == "train":
-                        loss_dict = self.train_step(X)
+                        loss_dict = self.train_step(x_in)
                     else:
-                        loss_dict = self.validation_step(X)
+                        loss_dict = self.validation_step(x_in)
 
                     if self.args.logging and step % self.args.log_every_n_steps == 0:
                         utils.log_step(loss_dict, step, epoch, phase)
@@ -118,7 +118,6 @@ class Trainer:
 
                 if phase == "valid" and epoch % self.args.eval_ll_every_n_epochs == 0:
                     self.vae_model.estimate_log_likelihood()
-
 
             utils.log_mog(self.vae_model, self.args)
 

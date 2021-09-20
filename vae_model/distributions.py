@@ -59,11 +59,8 @@ class AutoRegressiveDistribution(nn.Module):
                 mean, pre_scale = params_split[0], params_split[1]
                 scale = F.softplus(pre_scale)
 
-                print("mean.shape, scale.shape", mean.shape, scale.shape)
-
             # [S, B]
             log_prob_z_x = td.Independent(td.Normal(loc=mean, scale=scale), 1).log_prob(input_z)
-            print("log_prob_z_x.shape", log_prob_z_x.shape)
 
             # [S, B] -> [B,]
             if mean_reduce_sample_dim:
@@ -82,9 +79,6 @@ class AutoRegressiveDistribution(nn.Module):
                 bern_logits = self.params.reshape(S*B, -1)
 
             else:
-                # If input X is 3D as well, we assume one sample per data point
-                assert input_x.dim() == 2, "did not implement the 3D input case yet..."
-
                 # If input X is 2D, we assume the samples to correspond to multiple samples per data point
                 # Merge the sample dimension into the batch dimension:
                 # [S, B, D] -> [S*B, D]
@@ -112,72 +106,100 @@ class AutoRegressiveDistribution(nn.Module):
             return log_prob_x_z
 
     def rsample(self, sample_shape=(1,)):
-        # Context X: [B, D]
-        # Sample Z: [S, B, D]
-        # Params (mean, scale): 2 x [S, B, D]
-
-        assert len(sample_shape) == 1, "only accepting 1 dimensional shape for sample_shape (S,)"
-        assert self.dist_type == "gaussian", "This functionality is only implemented for the Gaussian case."
+        if sample_shape[0] > 1:
+            raise NotImplementedError
 
         B = self.context.shape[0]
         D = self.x_z_dim
-        S = sample_shape[0]
 
-        print("S B D", S, B, D)
-
-        z_sample = torch.zeros((S, B, D), device=self.context.device)
-        print("z_sample.shape")
-
+        z_sample = torch.zeros((B, D))
         mu_inferred, scale_inferred = [], []
 
-        for i in range(self.x_z_dim):
-            # [S*B, D*2]
-            z_reshape = z_sample.reshape(S*B, D)
-            context_x = self.context.repeat(S, 1, 1).reshape(S * B, -1)
-            print("z_reshape.shape, self.context.shape, context_x.shape", z_reshape.shape, context_x.shape)
-            mus_prescales = self.made(z_reshape, context=context_x)
-            # mus_prescales = torch.randn((z_reshape.shape[0], int(z_reshape.shape[1]*2)))
-            print("mu_prescales.shape", mus_prescales.shape)
-            mus_prescales = mus_prescales.reshape(S, B, D*2)
-            print("mu_prescales.shape (after reshape)", mus_prescales.shape)
+        for d in range(D):
+            mean_scale = self.made(z_sample, context=self.context)
+            mu, scale = torch.chunk(mean_scale, 2, dim=-1)
+            scale = F.softplus(scale)
 
-            # split in 2 x [S, B, D]
-            mus_prescales = torch.split(mus_prescales, 2, dim=-1)
-            mus, prescales = mus_prescales[0], mus_prescales[1]
-
-            print("mus, prescales shapes", mus.shape, prescales.shape)
-
-            # i-th dimension [S, B, i] = shape (S, B)
-            mu_i = mus[:, :, i]
-            scale_i = F.softplus(prescales[:, :, i])
-
-            print("mu_i.shape", mu_i.shape)
-            print("scale_i.shape", scale_i.shape)
+            mu_i = mu[:, d]
+            scale_i = scale[:, d]
 
             mu_inferred.append(mu_i)
             scale_inferred.append(scale_i)
 
-            # [S, B]
-            # don't pass sample shape because it is already implicit through set-up of shapes (S, B, D)
-            assert mu_i.shape == scale_i.shape == (S, B), "expecting mu_i and scale_i to be (S, B) - for one dimension"
+            z = td.Independent(td.Normal(loc=mu_i, scale=scale_i), 1).rsample()
+            z_sample[:, d] = z
 
-            z_i = td.Normal(loc=mu_i, scale=scale_i).rsample()
-
-            z_sample[:, :, i] = z_i
-
-        # [S, B, D]
         mu_inferred = torch.stack(mu_inferred, dim=-1)
         scale_inferred = torch.stack(scale_inferred, dim=-1)
+
+        z_sample = z_sample.unsqueeze(0)
+        mu_inferred = mu_inferred.unsqueeze(0)
+        scale_inferred = scale_inferred.unsqueeze(0)
 
         # [S, B, D], [S, B, D], [S, B, D]
         self.sample = z_sample
         self.params = (mu_inferred, scale_inferred)
 
-        print("z_sample.shape", z_sample.shape)
-        print("mu_inferred.shape", mu_inferred.shape)
-        print("scale_inderred.shape", scale_inferred.shape)
-
         return z_sample
+
+    # def rsample(self, sample_shape=(1,)):
+    #     # Context X: [B, D]
+    #     # Sample Z: [S, B, D]
+    #     # Params (mean, scale): 2 x [S, B, D]
+    #
+    #     assert len(sample_shape) == 1, "only accepting 1 dimensional shape for sample_shape (S,)"
+    #     assert self.dist_type == "gaussian", "This functionality is only implemented for the Gaussian case."
+    #
+    #     B = self.context.shape[0]
+    #     D = self.x_z_dim
+    #     S = sample_shape[0]
+    #
+    #     z_sample = torch.zeros((S, B, D), device=self.context.device)
+    #     mu_inferred, scale_inferred = [], []
+    #
+    #     for i in range(self.x_z_dim):
+    #         # [S*B, D]
+    #         z_reshape = z_sample.reshape(S*B, D)
+    #         context_x = self.context.repeat(S, 1, 1).reshape(S * B, -1)
+    #
+    #         print("z_reshape, context_x", z_reshape.shape, context_x.shape)
+    #         # 2 chunks [S*B, D]
+    #         mu, prescale = torch.chunk(self.made(z_reshape, context=context_x), 2, dim=-1)
+    #         mu, prescale = mu.reshape((S, B, D)), prescale.reshape((S, B, D))
+    #         scale = F.softplus(prescale)
+    #
+    #         # i-th dimension [S, B, i] = shape (S, B)
+    #         mu_i = mu[:, :, i]
+    #         scale_i = scale[:, :, i]
+    #
+    #         print("mu_i.shape", mu_i.shape)
+    #         print("scale_i.shape", scale_i.shape)
+    #
+    #         mu_inferred.append(mu_i)
+    #         scale_inferred.append(scale_i)
+    #
+    #         # [S, B]
+    #         # don't pass sample shape because it is already implicit through set-up of shapes (S, B, D)
+    #         assert mu_i.shape == scale_i.shape == (S, B), "expecting mu_i and scale_i to be (S, B) - for one dimension"
+    #
+    #         z_i = td.Independent(td.Normal(loc=mu_i, scale=scale_i), 1).rsample()
+    #         print("z_i.shape", z_i.shape)  # S, B
+    #
+    #         z_sample[:, :, i] = z_i
+    #
+    #     # [S, B, D]
+    #     mu_inferred = torch.stack(mu_inferred, dim=-1)
+    #     scale_inferred = torch.stack(scale_inferred, dim=-1)
+    #
+    #     # [S, B, D], [S, B, D], [S, B, D]
+    #     self.sample = z_sample
+    #     self.params = (mu_inferred, scale_inferred)
+    #
+    #     print("z_sample.shape", z_sample.shape)
+    #     print("mu_inferred.shape", mu_inferred.shape)
+    #     print("scale_inderred.shape", scale_inferred.shape)
+    #
+    #     return z_sample
 
     def sample(self, C, W, sample_shape=None):
         raise NotImplementedError
