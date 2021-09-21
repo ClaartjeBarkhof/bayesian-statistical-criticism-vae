@@ -35,9 +35,11 @@ class AutoRegressiveDistribution(nn.Module):
         # and we expect the samples Z to be 3D [S, B, D]
 
         if self.encoder:
-            # (B, H_dim) = self.context.shape
-            (S, B, D) = x_z.shape
             input_z = x_z
+            assert input_z.dim() == 3, f"We expect Z to be 3D (S, B, D), current shape {input_z.shape}"
+
+            # (B, H_dim) = self.context.shape
+            (S, B, D) = input_z.shape
 
             if self.params is not None:
                 # [S, B, D]
@@ -71,14 +73,15 @@ class AutoRegressiveDistribution(nn.Module):
 
         # BERNOULLI DECODER CASE
         # If decoder, we expect the context Z to be 3D [S, B, D]
-        # and we expect the samples X to be 2D or 3D (not implemented yet)
+        # and we expect the samples X to be 2D
         else:
-            (S, B, D) = self.context.shape
             input_x = x_z  # [B, X_dim]
+            assert input_x.dim() == 2, f"We expect X to be 3D (S, B, D), current shape {input_x.shape}"
+
+            (S, B, D) = self.context.shape
 
             if self.params is not None:
                 bern_logits = self.params
-
             else:
                 # If input X is 2D, we assume the samples to correspond to multiple samples per data point
                 # [S, B, D]
@@ -105,6 +108,8 @@ class AutoRegressiveDistribution(nn.Module):
             return log_prob_x_z
 
     def rsample(self, sample_shape=(1,)):
+        assert self.encoder and self.dist_type == "gaussian", "rsample() can only be used for a Gaussian encoder MADE"
+
         S = sample_shape[0]
         B = self.context.shape[0]
         D = self.x_z_dim
@@ -150,99 +155,32 @@ class AutoRegressiveDistribution(nn.Module):
 
         return z_samples
 
-    # def rsample(self, sample_shape=(1,)):
-    #     # Context X: [B, D]
-    #     # Sample Z: [S, B, D]
-    #     # Params (mean, scale): 2 x [S, B, D]
-    #
-    #     assert len(sample_shape) == 1, "only accepting 1 dimensional shape for sample_shape (S,)"
-    #     assert self.dist_type == "gaussian", "This functionality is only implemented for the Gaussian case."
-    #
-    #     B = self.context.shape[0]
-    #     D = self.x_z_dim
-    #     S = sample_shape[0]
-    #
-    #     z_sample = torch.zeros((S, B, D), device=self.context.device)
-    #     mu_inferred, scale_inferred = [], []
-    #
-    #     for i in range(self.x_z_dim):
-    #         # [S*B, D]
-    #         z_reshape = z_sample.reshape(S*B, D)
-    #         context_x = self.context.repeat(S, 1, 1).reshape(S * B, -1)
-    #
-    #         print("z_reshape, context_x", z_reshape.shape, context_x.shape)
-    #         # 2 chunks [S*B, D]
-    #         mu, prescale = torch.chunk(self.made(z_reshape, context=context_x), 2, dim=-1)
-    #         mu, prescale = mu.reshape((S, B, D)), prescale.reshape((S, B, D))
-    #         scale = F.softplus(prescale)
-    #
-    #         # i-th dimension [S, B, i] = shape (S, B)
-    #         mu_i = mu[:, :, i]
-    #         scale_i = scale[:, :, i]
-    #
-    #         print("mu_i.shape", mu_i.shape)
-    #         print("scale_i.shape", scale_i.shape)
-    #
-    #         mu_inferred.append(mu_i)
-    #         scale_inferred.append(scale_i)
-    #
-    #         # [S, B]
-    #         # don't pass sample shape because it is already implicit through set-up of shapes (S, B, D)
-    #         assert mu_i.shape == scale_i.shape == (S, B), "expecting mu_i and scale_i to be (S, B) - for one dimension"
-    #
-    #         z_i = td.Independent(td.Normal(loc=mu_i, scale=scale_i), 1).rsample()
-    #         print("z_i.shape", z_i.shape)  # S, B
-    #
-    #         z_sample[:, :, i] = z_i
-    #
-    #     # [S, B, D]
-    #     mu_inferred = torch.stack(mu_inferred, dim=-1)
-    #     scale_inferred = torch.stack(scale_inferred, dim=-1)
-    #
-    #     # [S, B, D], [S, B, D], [S, B, D]
-    #     self.sample = z_sample
-    #     self.params = (mu_inferred, scale_inferred)
-    #
-    #     print("z_sample.shape", z_sample.shape)
-    #     print("mu_inferred.shape", mu_inferred.shape)
-    #     print("scale_inderred.shape", scale_inferred.shape)
-    #
-    #     return z_sample
+    def sample(self, X_dim, sample_shape=(1,)):
+        assert not self.encoder and self.dist_type != "gaussian", "sample() can only be used by non Gaussian decoders"
 
-    def sample(self, C, W, sample_shape=None):
-        raise NotImplementedError
-        # if self.context.shape[0] > 1:
-        #     print("Not implemented multi sample decoder for multi-sample Z context")
-        #     raise NotImplementedError
-        # comm
-        # context_z = self.context.squeeze(0)
-        #
-        # if sample_shape is not None:
-        #     assert len(sample_shape) == 1, "only accepting 1 dimensional shape for sample_shape (S,)"
-        #
-        # assert self.dist_type == "bernoulli", "This functionality has only been implemented for the Bernoulli case so far."
-        #
-        # B = self.context.shape[0]
-        #
-        # if sample_shape is not None:
-        #     x_sample = torch.zeros((sample_shape[0], B, self.x_z_dim))
-        # else:
-        #     x_sample = torch.zeros((B, self.x_z_dim))
-        #
-        # logits = torch.zeros((B, self.x_z_dim))
-        #
-        # for i in range(self.x_z_dim):
-        #     logits = self.made(logits, context=context_z)
-        #     logits_i = logits[:, i]
-        #
-        #     x_sample[:, :, i] = td.Bernoulli(logits=logits_i).sample()
-        #
-        # # logits_inferred = torch.stack(logits_inferred, dim=1)
-        # # TODO: should this change the state?
-        #
-        # x_sample = x_sample.reshape(B, C, W, H)  # TOD: check this
-        #
-        # return x_sample
+        # [S, B, D]
+        context_z = self.context
+        (S, B, D) = context_z.shape
+
+        x_samples = []
+
+        for s in range(S):
+            # [B, X_dim]
+            x_sample = torch.zeros((B, X_dim), device=self.context.device)
+
+            for d in range(X_dim):
+                # x [B, X_dim] + context [B, D] -> logits [B, X_dim]
+                logits = self.made(x_sample, context=context_z[s, :, :])
+
+                x_sample_d = td.Bernoulli(logits=logits).sample()
+                x_sample = x_sample_d[:, d]
+
+            x_samples.append(x_samples)
+
+        # [S, B, D]
+        x_samples = torch.stack(x_samples, dim=0)
+
+        return x_samples
 
 
 @td.register_kl(AutoRegressiveDistribution, AutoRegressiveDistribution)

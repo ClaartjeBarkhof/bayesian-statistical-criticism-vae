@@ -33,7 +33,7 @@ def main():
         for encoder_network_type in ["basic_mlp_encoder", "basic_conv_encoder"]: # ,
             config.encoder_network_type = encoder_network_type
 
-            for q_z_x_type in ["independent_gaussian"]: #,"conditional_gaussian_made" "independent_gaussian"
+            for q_z_x_type in ["conditional_gaussian_made", "independent_gaussian"]: #, "independent_gaussian"
 
                 config.q_z_x_type = q_z_x_type
 
