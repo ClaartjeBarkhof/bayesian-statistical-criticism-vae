@@ -10,7 +10,7 @@ def main():
 
     config.batch_size = 3
     config.num_workers = 0
-    config.latent_dim = 2
+    config.latent_dim = 4
 
     config.image_or_language = "image"
 
@@ -21,7 +21,7 @@ def main():
     # for dataset_name, data_dist in zip(["bmnist", "mnist"], ["bernoulli", "multinomial"]):
     dataset_name = "bmnist"
     data_dist = "bernoulli"
-    print(dataset_name)
+
     config.image_dataset_name = dataset_name
     config.data_distribution = data_dist
 

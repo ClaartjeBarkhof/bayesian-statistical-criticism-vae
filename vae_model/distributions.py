@@ -126,6 +126,7 @@ class AutoRegressiveDistribution(nn.Module):
         assert self.encoder and self.dist_type == "gaussian", "rsample() can only be used for a Gaussian encoder MADE"
 
         S = sample_shape[0]
+        # Context x = [B, 256]
         B = self.context.shape[0]
         D = self.x_z_dim
 
@@ -133,9 +134,10 @@ class AutoRegressiveDistribution(nn.Module):
 
         for s in range(S):
 
-            # [B, D]
+            # All [B, D]
             z_sample_s = torch.zeros((B, D), device=self.context.device)
-            mu_s, scale_s = torch.zeros((B, D)), torch.zeros((B, D))
+            mu_s = torch.zeros((B, D), device=self.context.device)
+            scale_s = torch.zeros((B, D), device=self.context.device)
 
             for d in range(D):
                 # [B, D*2]
@@ -147,12 +149,16 @@ class AutoRegressiveDistribution(nn.Module):
 
                 # [B]
                 mu_d = mu[:, d]
-
                 scale_d = scale[:, d]
+
+                # [B, D]
                 mu_s[:, d] = mu_d
                 scale_s[:, d] = scale_d
 
+                # [B]
                 z_d = td.Normal(loc=mu_d, scale=scale_d).rsample()
+
+                # [B, D]
                 z_sample_s[:, d] = z_d
 
             z_samples.append(z_sample_s)
@@ -164,7 +170,7 @@ class AutoRegressiveDistribution(nn.Module):
         scales = torch.stack(scales, dim=0)
         z_samples = torch.stack(z_samples, dim=0)
 
-        # [S, B, D], [S, B, D], [S, B, D]
+        # All [S, B, D]
         self.sample = z_samples
         self.params = (mus, scales)
 
