@@ -99,6 +99,7 @@ class Trainer:
         for epoch in range(1000):
             for phase in ["train", "valid"]:
                 for batch_idx, batch in enumerate(self.data_loaders[phase]):
+                    # [B, C, W, H]
                     x_in, _ = batch
 
                     if phase == "train":

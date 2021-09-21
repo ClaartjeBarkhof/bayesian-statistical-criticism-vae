@@ -37,7 +37,7 @@ class VaeModel(nn.Module):
 
         return q_z_x, z_post, p_z, p_x_z
 
-    def estimate_log_likelihood(self, data_loader, n_samples=10):
+    def estimate_log_likelihood(self, data_loader, n_samples=10, max_batches=None):
         self.eval()
 
         iw_lls = []
@@ -45,6 +45,7 @@ class VaeModel(nn.Module):
             for batch_idx, batch in enumerate(data_loader):
                 print(f"... calculating importance weighted (n_samples={n_samples})"
                       f" log likelihood {batch_idx+1:3d}/{len(data_loader)}", end="\r")
+
                 x_in = batch[0]
                 x_in = x_in.to(self.device)
 
@@ -54,8 +55,6 @@ class VaeModel(nn.Module):
                 # [S, B]
                 log_q_z_x = q_z_x.log_prob(z_post)
                 log_p_z = p_z.log_prob(z_post)
-                if self.args.decoder_network_type == "conditional_made_decoder":
-                    x_in = x_in.reshape(x_in.shape[0], -1)
                 log_p_x_z = p_x_z.log_prob(x_in)
 
                 n_samples = log_p_x_z.shape[0]
@@ -66,6 +65,9 @@ class VaeModel(nn.Module):
                 iw_ll = torch.logsumexp(iw_frac, dim=0) - np.log(n_samples)
 
                 iw_lls.append(iw_ll)
+
+                if max_batches is not None and batch_idx + 1 == max_batches:
+                    break
 
             iw_lls = torch.cat(iw_lls)
 

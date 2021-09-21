@@ -49,7 +49,7 @@ class Objective(nn.Module):
             p_z:
                 a prior distribution object
             p_x_z:
-                a likelihood distribution(-like) object with parameters [S, B, ...X_dims...]
+                a likelihood distribution(-like) object:
         Returns:
             loss_dict:
                 a dictionary containing statistics to log and 'total_loss' which is used for optimisation
@@ -67,22 +67,19 @@ class Objective(nn.Module):
             # TODO: for language should be something along the lines of x[:, 1:] (cutting of the start token)
             labels = x_in
 
-        # Expected KL from prior to posterior
+        # Expected KL from prior to posterior (scalar)
         kl_prior_post = self.kl_prior_post(p_z=p_z, q_z_x=q_z_x, batch_size=B,
                                            z_post=z_post, analytical=True)
 
-        if self.args.decoder_network_type == "conditional_made_decoder":
-            # In case of the MADE, the evaluation is in flattened form
-            labels = labels.reshape(B, -1)
-
-        # Distortion
+        # Distortion [S, B]
         log_p_x_z = p_x_z.log_prob(labels)
         assert log_p_x_z.shape == (S, B), f"we assume p_x_z.log_prob shape to be be (S, B), currently {log_p_x_z.shape}"
+        # Average over samples and batch: [S, B] -> scalar
         distortion = - log_p_x_z.mean()
 
         # Maximum mean discrepancy
-        # z_post at this point is [1, B, D]
-        mmd = self.maximum_mean_discrepancy(z_post.squeeze(0))
+        # z_post at this point is [S, B, D]
+        mmd = self.maximum_mean_discrepancy(z_post)
 
         total_loss, mdr_loss, mdr_multiplier = None, None, None
 

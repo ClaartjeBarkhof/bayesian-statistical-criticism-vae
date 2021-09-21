@@ -73,12 +73,18 @@ class AutoRegressiveDistribution(nn.Module):
 
         # BERNOULLI DECODER CASE
         # If decoder, we expect the context Z to be 3D [S, B, D]
-        # and we expect the samples X to be 2D
+        # and we expect the samples X to be [B, C, W, H]
         else:
             input_x = x_z  # [B, X_dim]
-            assert input_x.dim() == 2, f"We expect X to be 3D (S, B, D), current shape {input_x.shape}"
 
-            (S, B, D) = self.context.shape
+            assert input_x.dim() == 4, f"We expect X to be 4D (B, C, W, H), current shape {input_x.shape}"
+            assert self.context.dim() == 3, f"We expect context Z to be 3D (S, B, D), current shape {self.context.shape}"
+
+            (B, C, W, H) = input_x.shape
+            (S, _, D) = self.context.shape
+
+            # flatten x [B, C, W, H] -> [B, C*W*H]
+            input_x_flat = input_x.reshape(B, -1)
 
             if self.params is not None:
                 bern_logits = self.params
@@ -90,16 +96,25 @@ class AutoRegressiveDistribution(nn.Module):
                 bern_logits = []
                 for s in range(S):
 
-                    # [B, X_dim]
-                    bern_logits_s = self.made(input_x, context=context_z[s, :, :])
+                    # [B, C*W*H]
+                    bern_logits_s = self.made(input_x_flat, context=context_z[s, :, :])
+
+                    # [B, C*W*H] -> [B, C, W, H]
+                    bern_logits_s = bern_logits_s.reshape(B, C, W, H)
                     bern_logits.append(bern_logits_s)
 
-                # [S, B, X_dim]
+                # [S, B, C, W, H]
                 bern_logits = torch.stack(bern_logits, dim=0)
                 self.params = bern_logits
 
-            # [S, B] reinterpreted_batch_ndims=1 because we are working with flattened input
-            log_prob_x_z = td.Independent(td.Bernoulli(logits=bern_logits), 1).log_prob(input_x)
+            # [S, B, C, W, H]
+            assert bern_logits.shape == (S, B, C, W, H), \
+                f"bernoulli logits must be of shape  (S, B, C, W, H), currently pf shape {bern_logits.shape}"
+
+            # [S, B]
+            log_prob_x_z = td.Independent(td.Bernoulli(logits=bern_logits), 3).log_prob(input_x)
+            assert log_prob_x_z.shape == (S, B), \
+                f"log_prob_x_z should be of shape (S, B), currently of shape {log_prob_x_z.shape}"
 
             # [S, B] -> [B,]
             if mean_reduce_sample_dim:
@@ -155,10 +170,13 @@ class AutoRegressiveDistribution(nn.Module):
 
         return z_samples
 
-    def sample(self, X_dim, sample_shape=(1,)):
+    def sample(self, X_shape, sample_shape=(1,)):
+        assert len(X_shape) == 4, f"we expected X_shape to be (B, C, W, H), currently given {X_shape}"
         assert not self.encoder and self.dist_type != "gaussian", "sample() can only be used by non Gaussian decoders"
 
         # [S, B, D]
+        B, C, W, H = X_shape
+        X_dim_flat = C * W * H
         context_z = self.context
         (S, B, D) = context_z.shape
 
@@ -166,19 +184,22 @@ class AutoRegressiveDistribution(nn.Module):
 
         for s in range(S):
             # [B, X_dim]
-            x_sample = torch.zeros((B, X_dim), device=self.context.device)
+            x_sample = torch.zeros((B, X_dim_flat), device=self.context.device)
 
-            for d in range(X_dim):
+            for d in range(X_dim_flat):
                 # x [B, X_dim] + context [B, D] -> logits [B, X_dim]
                 logits = self.made(x_sample, context=context_z[s, :, :])
-
+                # [B, X_dim]
                 x_sample_d = td.Bernoulli(logits=logits).sample()
                 x_sample = x_sample_d[:, d]
 
             x_samples.append(x_samples)
 
-        # [S, B, D]
+        # [S, B, X_dim_flat]
         x_samples = torch.stack(x_samples, dim=0)
+
+        # [S, B, X_dim_flat] -> [S, B, C, W, H]
+        x_samples = x_samples.reshape(S, B, C, W, H)
 
         return x_samples
 

@@ -99,28 +99,26 @@ class GenerativeModel(nn.Module):
         """
 
         if self.decoder_network_type == "conditional_made_decoder":
+            # Autoregressive distribution object
             p_x_z = self.decoder_network(z)
 
         else:
-            # Z [S, B, D], reduce S in B for forward
-            (S, B, D) = z.shape
-            z_flat = z.reshape(S*B, D)
-            p_x_z_params = self.decoder_network(z_flat)
+            # [S, B, D]
+            (S, B, _) = z.shape
+            # flattening / reshaping for MLP or Conv happens in respective modules
+            p_x_z_params = self.decoder_network(z)
 
             if self.p_x_z_type == "bernoulli":
-                # p_x_z_params: [B*S, C, W, H] -> [S, B, C, W, H]
-                p_x_z_params = p_x_z_params.reshape(S, B, self.C, self.image_w_h, self.image_w_h)
+                # [S, B, C, W, H]
+                assert p_x_z_params.shape == (S, B, self.C, self.image_w_h, self.image_w_h), \
+                    f"bernoulli logits should be of shape [S, B, C, W, H], currently of shape {p_x_z_params.shape}"
                 p_x_z = td.Independent(td.Bernoulli(logits=p_x_z_params), 3)  # reduce last 3 dimensions with log_prob
 
             elif self.p_x_z_type == "multinomial":
-                # image: p_x_z_params: [B*S, C, num_classes, W, H] -> [S, B, C, num_classes, W, H]
-                num_classes = 256
-                p_x_z_params = p_x_z_params.reshape(S, B, num_classes, self.C, self.image_w_h, self.image_w_h)
-                # [S, B, C, num_classes, W, H] -> [S, B, C, W, H, num_classes]
-                p_x_z_params = p_x_z_params.permute(0, 1, 2, 4, 5, 3)
-
+                # [S, B, C, W, H, num_classes]
+                assert p_x_z_params.shape == (S, B, self.C, self.image_w_h, self.image_w_h), \
+                    f"multinomial logits should be of shape [S, B, C, W, H, num_classes], currently of shape {p_x_z_params.shape}"
                 p_x_z = td.Categorical(logits=p_x_z_params)
-
             else:
                 raise ValueError(f"{self.p_x_z_type} is not a valid data_distribution, choices: bernoulli, multinomial")
 
@@ -233,20 +231,25 @@ class DecoderGatedConvolutionBlock(nn.Module):
 
     def forward(self, z):
         """z -> p_x_z params"""
+        assert z.dim() == 3, f"we assume z to be 3D, current shape {z.shape}"
 
-        B = z.size(0)
-        z = z.view(B, self.D, 1, 1)
+        (S, B, D) = z.shape
 
-        # Multinomial: [B, C*256, image_w_h, image_w_h] (logits, pre-softmax)
-        # Bernoulli: [B, C, image_w_h, image_w_h] (logits, pre-sigmoid)
+        # [S, B, D] -> [S*B, D, 1, 1]
+        z = z.reshape(-1, D, 1, 1)
 
+        # Multinomial: [S*B, C*256, image_w_h, image_w_h] (logits, pre-softmax)
+        # Bernoulli: [S*B, C, image_w_h, image_w_h] (logits, pre-sigmoid)
         p_x_z_params = self.decoder_gated_cnn_block(z)
 
-        if self.C == 1 and self.data_distribution == "multinomial":
-            p_x_z_params = p_x_z_params.unsqueeze(1)
-        elif self.C == 3:
-            print("Code not checked for 3-channel input, implement something with reshape here.")
-            raise NotImplementedError
+        if self.data_distribution == "multinomial":
+            # [S*B, C*256, image_w_h, image_w_h] -> [S, B, C, 256, image_w_h, image_w_h] (6 dim)
+            p_x_z_params = p_x_z_params.reshape(S, B, self.C, self.num_classes, self.image_w_h, self.image_w_h)
+            # [S, B, C, num_classes, W, H] -> [S, B, C, W, H, num_classes]
+            p_x_z_params = p_x_z_params.permute(0, 1, 2, 4, 5, 3)
+        else:
+            # [S*B, C, image_w_h, image_w_h] -> [S, B, C, image_w_h, image_w_h] (5 dim)
+            p_x_z_params = p_x_z_params.reshape(S, B, self.C, self.image_w_h, self.image_w_h)
 
         return p_x_z_params
 
@@ -284,19 +287,28 @@ class DecoderMLPBlock(nn.Module):
         )
 
     def forward(self, z):
-        # Reshape to [B, image_w*image_h*C]
+        assert z.dim() == 3, f"we assume z to be 3D, current shape {z.shape}"
+
+        (S, B, D) = z.shape
+
+        # [S, B, D] -> [S*B, D]
+        z = z.reshape(-1, D)
+
+        # Reshape to bernoulli [S*B, image_w*image_h*C] or multinomial [S*B, C*num_classes*W*H]
         pred_flat = self.decoder_mlp_block(z)
 
-        # Bernoulli: [B, C, image_w_h, image_w_h] (4 dim)
+        # Bernoulli: [S*B, image_w*image_h*C] -> [S, B, C, image_w_h, image_w_h] (5 dim)
         if self.data_distribution == "bernoulli":
-            assert pred_flat.shape == (z.shape[0], self.C * self.image_w_h * self.image_w_h), \
+            assert pred_flat.shape == (S*B, self.C * self.image_w_h * self.image_w_h), \
                 "Expected the predictions to be of shape [B, C*W*H]"
-            p_x_z_params = pred_flat.reshape(z.shape[0], self.C, self.image_w_h, self.image_w_h)
+            p_x_z_params = pred_flat.reshape(S, B, self.C, self.image_w_h, self.image_w_h)
 
-        # Multinomial: [B, C, num_classes, W, H]
+        # Multinomial: [S*B, C*num_classes*W*H] -> [S, B, C, num_classes, W, H] (6 dim)
         else:
-            assert pred_flat.shape == (z.shape[0], self.C * self.image_w_h * self.image_w_h * self.num_classes), \
+            assert pred_flat.shape == (S*B, self.C * self.image_w_h * self.image_w_h * self.num_classes), \
                 "Expected the predictions to be of shape [B, C*num_classes*W*H]"
-            p_x_z_params = pred_flat.reshape(z.shape[0], self.C, self.num_classes, self.image_w_h, self.image_w_h)
+            p_x_z_params = pred_flat.reshape(S, B, self.C, self.num_classes, self.image_w_h, self.image_w_h)
+            # [S, B, C, num_classes, W, H] -> [S, B, C, W, H, num_classes]
+            p_x_z_params = p_x_z_params.permute(0, 1, 2, 4, 5, 3)
 
         return p_x_z_params

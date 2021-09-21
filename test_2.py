@@ -1,8 +1,9 @@
-from arguments import prepare_parser
+from arguments import prepare_parser, check_settings
 from vae_model.vae import VaeModel
 from dataset_dataloader import ImageDataset
 from train import Trainer
 import torch
+
 
 def main():
     config = prepare_parser(print_settings=True)
@@ -33,13 +34,15 @@ def main():
         for encoder_network_type in ["basic_mlp_encoder", "basic_conv_encoder"]: # ,
             config.encoder_network_type = encoder_network_type
 
-            for q_z_x_type in ["conditional_gaussian_made", "independent_gaussian"]: #, "independent_gaussian"
+            for q_z_x_type in ["conditional_gaussian_made"]: #, "independent_gaussian" "conditional_gaussian_made",
 
                 config.q_z_x_type = q_z_x_type
 
                 for p_z_type in ["isotropic_gaussian"]: #, "mog"
                     config.p_z_type = p_z_type
                     config.mog_n_components = 3
+
+                    check_settings(config)
 
                     print(f"{counter} | dataset: {dataset_name.upper()}, data dist {data_dist}, encoder_network_type: {encoder_network_type}, decoder_network_type: {decoder_network_type}, q_z_x_type {q_z_x_type}, p_z_type {p_z_type}")
                     if decoder_network_type == "conditional_made_decoder" and data_dist == "multinomial":
@@ -51,17 +54,14 @@ def main():
 
                     with torch.autograd.set_detect_anomaly(True):
                         for i, (X, y) in enumerate(train_loader):
-                            #print(f"{i} X input shape", X.shape)
+                            print(f"{i} X input shape", X.shape)
 
                             #vae(X)
                             loss_dict = trainer.train_step(X)
                             #
-                            #vae.estimate_log_likelihood(dataset.valid_loader())
+                            vae.estimate_log_likelihood(dataset.valid_loader(), n_samples=2, max_batches=2)
 
-                            # break
-
-                            if i == 3:
-                                break
+                            break
 
                     print("\n\n")
 
