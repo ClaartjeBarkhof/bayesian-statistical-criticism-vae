@@ -104,7 +104,8 @@ class GenerativeModel(nn.Module):
         else:
             # Z [S, B, D], reduce S in B for forward
             (S, B, D) = z.shape
-            p_x_z_params = self.decoder_network(z.reshape(-1, z.shape[-1]))
+            z_flat = z.reshape(S*B, D)
+            p_x_z_params = self.decoder_network(z_flat)
 
             if self.p_x_z_type == "bernoulli":
                 # p_x_z_params: [B*S, C, W, H] -> [S, B, C, W, H]
@@ -262,6 +263,7 @@ class DecoderMLPBlock(nn.Module):
         super(DecoderMLPBlock, self).__init__()
 
         self.data_distribution = args.data_distribution
+
         if self.data_distribution == "bernoulli":
             self.num_classes = 1
         elif self.data_distribution == "multinomial":

@@ -68,6 +68,8 @@ def prepare_parser(jupyter=False, print_settings=True):
     parser.add_argument("--max_gradient_norm", type=float, default=1.0)
     # TODO: parser.add_argument("--lr_scheduler", default=False, type=lambda x: bool(distutils.util.strtobool(x)),
     #                     help="Whether or not to use a lr scheduler (default: True).")
+    parser.add_argument("--iw_n_samples", type=int, default=50,
+                        help="Number of samples for IW LL estimation.")
 
     # ----------------------------------------------------------------------------------------------------------------
     # ARCHITECTURE

@@ -117,7 +117,9 @@ class Trainer:
                         step += 1
 
                 if phase == "valid" and epoch % self.args.eval_ll_every_n_epochs == 0:
-                    self.vae_model.estimate_log_likelihood()
+                    iw_ll_mean, iw_ll_std = self.vae_model.estimate_log_likelihood(self.data_loaders["valid"],
+                                                                                   n_samples=self.args.iw_n_samples)
+                    utils.log_step(dict(iw_ll_mean=iw_ll_mean, iw_ll_std=iw_ll_std), step, epoch, phase)
 
             utils.log_mog(self.vae_model, self.args)
 
