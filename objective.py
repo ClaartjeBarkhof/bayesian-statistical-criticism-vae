@@ -79,6 +79,7 @@ class Objective(nn.Module):
 
         # Maximum mean discrepancy
         # z_post at this point is [S, B, D]
+        # mmd = scalar tensor
         mmd = self.maximum_mean_discrepancy(z_post)
 
         total_loss, mdr_loss, mdr_multiplier = None, None, None

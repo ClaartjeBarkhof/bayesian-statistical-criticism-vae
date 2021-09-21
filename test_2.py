@@ -34,11 +34,11 @@ def main():
         for encoder_network_type in ["basic_mlp_encoder", "basic_conv_encoder"]: # ,
             config.encoder_network_type = encoder_network_type
 
-            for q_z_x_type in ["conditional_gaussian_made"]: #, "independent_gaussian" "conditional_gaussian_made",
+            for q_z_x_type in ["conditional_gaussian_made"]: #, "independent_gaussian" ,
 
                 config.q_z_x_type = q_z_x_type
 
-                for p_z_type in ["isotropic_gaussian"]: #, "mog"
+                for p_z_type in ["mog"]: #, "mog" "isotropic_gaussian"
                     config.p_z_type = p_z_type
                     config.mog_n_components = 3
 

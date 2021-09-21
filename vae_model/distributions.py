@@ -147,19 +147,23 @@ class AutoRegressiveDistribution(nn.Module):
                 mu, scale = torch.chunk(mean_scale, 2, dim=-1)
                 scale = F.softplus(scale)
 
+                # prepare for index_put operation
+                indices = torch.LongTensor([[i, d] for i in range(B)])
+                indices = tuple(indices.t())
+
                 # [B]
                 mu_d = mu[:, d]
                 scale_d = scale[:, d]
 
                 # [B, D]
-                mu_s[:, d] = mu_d
-                scale_s[:, d] = scale_d
+                mu_s = mu_s.index_put(indices, mu_d)
+                scale_s = scale_s.index_put(indices, scale_d)
 
                 # [B]
                 z_d = td.Normal(loc=mu_d, scale=scale_d).rsample()
 
                 # [B, D]
-                z_sample_s[:, d] = z_d
+                z_sample_s = z_sample_s.index_put(indices, z_d)
 
             z_samples.append(z_sample_s)
             mus.append(mu_s)
