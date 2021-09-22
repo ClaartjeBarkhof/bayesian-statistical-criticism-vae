@@ -138,3 +138,4 @@ check_inference_model.ipynb
 /run_files/
 /checkpoints/
 /wandb/
+/notebooks/knnclassifier.pickle
