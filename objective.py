@@ -77,7 +77,7 @@ class Objective(nn.Module):
         # Average over samples and batch: [S, B] -> scalar
         distortion = - log_p_x_z.mean()
 
-        self.free_bits_kl(p_z, q_z_x, z_post, free_bits=self.args.free_bits, per_dimension=False)  # TODO
+        # TODO: self.free_bits_kl(p_z, q_z_x, z_post, free_bits=self.args.free_bits, per_dimension=False)
 
         # Maximum mean discrepancy
         # z_post at this point is [S, B, D]

@@ -8,11 +8,11 @@ batch = slurmjobs.SlurmBatch(
 # generate jobs across parameter grid
 run_script, job_paths = batch.generate([
     # ('p_z_type', ['isotropic_gaussian', 'mog']),
+    ('q_z_x_type', ["independent_gaussian", "conditional_gaussian_made"]),
     ('encoder_network_type', ["basic_conv_encoder", "basic_mlp_encoder"]),
     ('decoder_network_type', ['basic_mlp_decoder', 'basic_deconv_decoder', 'conditional_made_decoder'])],
     p_z_type="isotropic_gaussian",
     objective="VAE",
-    q_z_x_type="conditional_gaussian_made",
     beta_beta=0.9,
     mdr_value=8.0,
     mdr_constraint_optim_lr=0.001,
@@ -20,6 +20,7 @@ run_script, job_paths = batch.generate([
     info_lambda=1000.0,
     batch_size=64,
     max_epochs=120,
+    eval_ll_every_n_epochs=1,
     latent_dim=10,
     mog_n_components=10,
     p_x_z_type="bernoulli",
@@ -30,7 +31,9 @@ run_script, job_paths = batch.generate([
     print_every_n_steps=50,
     iw_n_samples=50,
     logging=True,
-    log_every_n_steps=10,
+    log_every_n_steps=5,
+    short_dev_run=False,
+    checkpointing=True,
     gpus=1)
 
 slurmjobs.util.summary(run_script, job_paths)
@@ -38,7 +41,7 @@ slurmjobs.util.summary(run_script, job_paths)
 basic_stuff = """#!/bin/bash
 #SBATCH -p gpu
 #SBATCH --gpus=1
-#SBATCH -t 02:00:00
+#SBATCH -t 03:00:00
 #SBATCH --mem 10G
 #SBATCH --output /home/cbarkhof/slurm-logs/%j-slurm-log.out
 
