@@ -37,7 +37,7 @@ class VaeModel(nn.Module):
 
         return q_z_x, z_post, p_z, p_x_z
 
-    def estimate_log_likelihood(self, data_loader, n_samples=10, max_batches=None):
+    def estimate_log_likelihood(self, data_loader, n_samples=10, max_batches=None, short_dev_run=False):
         self.eval()
 
         iw_lls = []
@@ -67,6 +67,9 @@ class VaeModel(nn.Module):
                 iw_lls.append(iw_ll)
 
                 if max_batches is not None and batch_idx + 1 == max_batches:
+                    break
+
+                if short_dev_run and batch_idx == 1:
                     break
 
             iw_lls = torch.cat(iw_lls)

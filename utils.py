@@ -2,22 +2,14 @@ import wandb
 import torch
 import collections
 import numpy as np
-import datetime
 from tabulate import tabulate
+
 
 def init_logging(vae_model, args):
     """Initialise W&B logging."""
     print("W&B INIT: RUN NAME", args.run_name)
-    wandb.init(project=args.wandb_project, name=args.run_name, entity='fall-2021-vae-claartje-wilker', config=args)
+    wandb.init(project=args.wandb_project, dir=args.wandb_dir, name=args.run_name, entity='fall-2021-vae-claartje-wilker', config=args)
     # Define the custom x axis metric
-
-    # total_loss = total_loss,
-    # mmd = mmd,
-    # elbo = elbo,
-    # mdr_loss = mdr_loss,
-    # mdr_multiplier = mdr_multiplier,
-    # distortion = distortion,
-    # kl_prior_post = kl_prior_post
 
     phases = ["train", "valid"]
     metrics = ["total_loss", "mmd", "elbo", "mdr_loss", "mdr_multiplier", "distortion", "kl_prior_post", "iw_ll"]
@@ -38,17 +30,17 @@ def init_logging(vae_model, args):
     # wandb.init(name=args.run_name, project=args.wandb_project, config=args)
     # wandb.watch(vae_model) this gives an error on LISA
 
-
 # def log_mog(vae_model, args):
 #     if args.p_z_type == "mog":
 #         mix = vae_model.gen_model.mix_components.data  # [n_comp]
 #         mean = vae_model.gen_model.component_means.data  # [n_comp, D]
 #         scale = vae_model.gen_model.component_scales.data # [n_comp, D]
 
+
 def insert_epoch_stats(epoch_stats, loss_dict):
     stat_dict = clean_loss_dict_log_print(loss_dict)
 
-    for k, v in loss_dict.items():
+    for k, v in stat_dict.items():
         if k not in epoch_stats:
             epoch_stats[k] = [v]
         else:
@@ -61,21 +53,28 @@ def reduce_and_log_epoch_stats(epoch_stats, phase, epoch, step, print_stats=True
     print_list = []
     wandb_log_dict = {}
 
+    mean_val_loss = None
     for i, (k, v) in enumerate(epoch_stats.items()):
         mean, std = np.mean(v), np.std(v)
         wandb_log_dict[f"{phase}_epoch/{k} std"] = std
         wandb_log_dict[f"{phase}_epoch/{k} mean"] = mean
         print_list.append([i, k, f"{mean:.2f}", f"{std:.2f}"])
 
+        if phase == "valid" and k == "total_loss":
+            mean_val_loss = mean
+
     wandb_log_dict["epoch"] = epoch
     wandb_log_dict["global step"] = step
     wandb.log(wandb_log_dict)
 
     if print_stats:
-        print(f"End of epoch {epoch}, phase {phase}, train step {step}\n")
+        print()
+        print("---------------------------------------------")
+        print(f"** End of epoch {epoch}, phase {phase}, train step {step}")
         print(tabulate(print_list, headers=["", "Metric", "Epoch mean", "Epoch std."]))
+        print("---------------------------------------------")
 
-    return wandb_log_dict
+    return mean_val_loss
 
 
 def make_nested_dict():
@@ -106,7 +105,7 @@ def log_step(loss_dict, step, epoch, phase):
     log_dict = clean_loss_dict_log_print(loss_dict)
     wandb_log_dict = dict()
     for k, v in log_dict.items():
-        wandb_log_dict[f"{phase}_step/{k}"] = v
+        wandb_log_dict[f"{phase}_batch/{k}"] = v
 
     wandb_log_dict["epoch"] = epoch
     wandb_log_dict["global step"] = step
@@ -136,6 +135,14 @@ def determine_device(args):
 
 
 def make_checkpoint(model, args, optimisers, epoch, step, best_val_loss):
+    c_path = f"{args.checkpoint_dir}{args.run_name}.pt"
+    # , saving checkpoint at:\n{c_path}
+    print()
+    print("*"*40)
+    print(f"Found new best validation loss {best_val_loss:.2f}")
+    print("*" * 40)
+    print()
+
     state = {
         'best_val_loss': best_val_loss,
         'epoch': epoch,
@@ -143,11 +150,7 @@ def make_checkpoint(model, args, optimisers, epoch, step, best_val_loss):
         'state_dict': model.state_dict(),
     }
 
-    datetime_stamp = datetime.datetime.now().strftime("%Y-%m-%d--%H:%M:%S")
-    date, time = datetime_stamp.split("--")[0], datetime_stamp.split("--")[1]
-    date_time = f"{date}-{time}"
-
     for opt_name, opt in optimisers.items():
         state[opt_name] = opt.state_dict()
 
-    torch.save(state, f"{args.checkpoint_dir}/{args.run_name}_{date_time}.pt")
+    torch.save(state, c_path)

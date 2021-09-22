@@ -96,7 +96,7 @@ class Trainer:
     def train(self):
         epoch, step = 0, 0
 
-        best_val_loss = 10000.0
+        best_val_loss, mean_val_loss = 10000.0, None
 
         for epoch in range(1000):
             for phase in ["train", "valid"]:
@@ -133,17 +133,20 @@ class Trainer:
 
                 if phase == "valid" and epoch % self.args.eval_ll_every_n_epochs == 0:
                     iw_lls = self.vae_model.estimate_log_likelihood(self.data_loaders["valid"],
-                                                                    n_samples=self.args.iw_n_samples)
+                                                                    n_samples=self.args.iw_n_samples,
+                                                                    short_dev_run=self.args.short_dev_run)
                     epoch_stats["iw_ll"] = iw_lls
 
                 # W&B Log epoch statistics as <phase>_epoch/<metric>
                 if self.args.logging:
-                    utils.reduce_and_log_epoch_stats(epoch_stats, phase, epoch, step,
-                                                     print_stats=self.args.print_stats)
+                    mean_val_loss = utils.reduce_and_log_epoch_stats(epoch_stats, phase, epoch, step,
+                                                                     print_stats=self.args.print_stats)
 
-                if epoch_stats["total_loss"] < best_val_loss and phase == "valid":
-                    utils.make_checkpoint(self.vae_model, self.args, self.optimisers, epoch, step, best_val_loss)
-                    best_val_loss = epoch_stats["total_loss"]
+                if phase == "valid" and mean_val_loss is not None:
+                    if mean_val_loss < best_val_loss:
+                        best_val_loss = mean_val_loss
+                        if self.args.checkpointing:
+                            utils.make_checkpoint(self.vae_model, self.args, self.optimisers, epoch, step, best_val_loss)
 
             # TODO: utils.log_mog(self.vae_model, self.args)
 
@@ -156,8 +159,12 @@ class Trainer:
                 break
 
 
-def main():
-    args = prepare_parser(print_settings=True)
+def main(config=None):
+    if config is None:
+        args = prepare_parser(print_settings=True)
+    else:
+        print("USING CONFIG")
+        args = config
 
     device_name = utils.determine_device(args)
 

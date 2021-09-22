@@ -153,7 +153,7 @@ class Objective(nn.Module):
         return kl.mean()
 
     @staticmethod
-    def free_bits_kl(self, p_z, q_z_x, z_post, free_bits=0.5, per_dimension=True):
+    def free_bits_kl(p_z, q_z_x, z_post, free_bits=0.5, per_dimension=True):
         # TODO: come up with solution for the fact that if p_z is of type MixtureSameFamily,
         # TODO: the latent dimensions are automatically reduced due to the component distribution being of type Independent
 
@@ -186,11 +186,6 @@ class Objective(nn.Module):
         kl_mask = (kl > free_bits).float()
 
         kl_fb = kl * kl_mask
-
-        print("XXXXXX")
-        print("kl", kl)
-        print("kl_fb", kl_fb)
-        print("XXXXXX")
 
         return kl_fb.mean()
 

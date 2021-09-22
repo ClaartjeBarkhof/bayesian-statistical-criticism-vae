@@ -2,6 +2,7 @@ import distutils
 import configargparse
 import sys
 import os
+import datetime
 
 
 def prepare_parser(jupyter=False, print_settings=True):
@@ -147,6 +148,8 @@ def prepare_parser(jupyter=False, print_settings=True):
                         help="Every how many steps to print.")
     parser.add_argument("--logging", default=False, type=lambda x: bool(distutils.util.strtobool(x)),
                         help="Whether or not to log the process of the model (default: True).")
+    parser.add_argument("--checkpointing", default=False, type=lambda x: bool(distutils.util.strtobool(x)),
+                        help="Whether or not to save checkpoints.")
     parser.add_argument("--log_every_n_steps", default=1, type=int,
                         help="Every how many steps to log (default: 20).")
     parser.add_argument("--wandb_project", default='fall-2021-VAE', type=str,
@@ -179,10 +182,12 @@ def prepare_parser(jupyter=False, print_settings=True):
                         help="A prefix to pre-pend to the run_name argument.")
     parser.add_argument("--run_name", default="", type=str,
                         help="Run name that will show up in W&B.")
-    parser.add_argument("--checkpoint_dir", default=get_code_dir()+"/train_jobs/checkpoints/", type=str,
+    parser.add_argument("--checkpoint_dir", default=get_code_dir()+"/run_files/checkpoints/", type=str,
                         help="Which directories to save checkpoints at.")
-    # parser.add_argument("--fast_dev_run", default=False, type=lambda x: bool(distutils.util.strtobool(x)),
-    #                     help="Whether or not to perform a fast_dev_run.")
+    parser.add_argument("--wandb_dir", default=get_code_dir() + "/run_files/", type=str,
+                        help="Which directories to save checkpoints at.")
+
+
 
     # TODO: add seed & deterministic
 
@@ -191,6 +196,7 @@ def prepare_parser(jupyter=False, print_settings=True):
 
     args = parser.parse_args()
 
+    os.makedirs(get_code_dir()+"/run_files", exist_ok=True)
     os.makedirs(args.checkpoint_dir, exist_ok=True)
 
     args.run_name = make_run_name(args)
@@ -226,7 +232,11 @@ def make_run_name(args):
     # name = f"{args.objective} | {args.image_dataset_name.upper()} ({args.data_distribution}) | Q_Z_X: {args.q_z_x_type} " \
     #        f"P_Z: {args.p_z_type} P_X_Z: {args.p_x_z_type} DECODER-TYPE: {args.decoder_network_type}"
 
-    name = f"q(z|x) {args.encoder_network_type} - {args.q_z_x_type} | p(x|z) {args.decoder_network_type}"
+    datetime_stamp = datetime.datetime.now().strftime("%Y-%m-%d--%H:%M:%S")
+    date, time = datetime_stamp.split("--")[0], datetime_stamp.split("--")[1]
+    date_time = f"{date}-{time}"
+
+    name = f"q(z|x) {args.encoder_network_type} - {args.q_z_x_type} | p(x|z) {args.decoder_network_type} - {date_time}"
 
     return args.run_name_prefix + name
 
