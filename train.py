@@ -96,8 +96,13 @@ class Trainer:
     def train(self):
         epoch, step = 0, 0
 
+        best_val_loss = 10000.0
+
         for epoch in range(1000):
             for phase in ["train", "valid"]:
+
+                epoch_stats = utils.make_nested_dict()
+
                 for batch_idx, batch in enumerate(self.data_loaders[phase]):
                     # [B, C, W, H]
                     x_in, _ = batch
@@ -107,24 +112,45 @@ class Trainer:
                     else:
                         loss_dict = self.validation_step(x_in)
 
+                    epoch_stats = utils.insert_epoch_stats(epoch_stats, loss_dict)
+
+                    # Log train step batch statistics batch
                     if self.args.logging and step % self.args.log_every_n_steps == 0:
                         utils.log_step(loss_dict, step, epoch, phase)
 
+                    # Print train / validation step batch statistics
                     if self.args.print_stats and step % self.args.print_every_n_steps == 0:
                         utils.print_step(step, epoch, batch_idx, len(self.data_loaders[phase]),
                                          phase, self.args, loss_dict)
 
+                    # Increment step
                     if phase == "train":
                         step += 1
 
-                if phase == "valid" and epoch % self.args.eval_ll_every_n_epochs == 0:
-                    iw_ll_mean, iw_ll_std = self.vae_model.estimate_log_likelihood(self.data_loaders["valid"],
-                                                                                   n_samples=self.args.iw_n_samples)
-                    utils.log_step(dict(iw_ll_mean=iw_ll_mean, iw_ll_std=iw_ll_std), step, epoch, phase)
+                    # For testing break out early
+                    if self.args.short_dev_run and batch_idx == 2:
+                        break
 
-            utils.log_mog(self.vae_model, self.args)
+                if phase == "valid" and epoch % self.args.eval_ll_every_n_epochs == 0:
+                    iw_lls = self.vae_model.estimate_log_likelihood(self.data_loaders["valid"],
+                                                                    n_samples=self.args.iw_n_samples)
+                    epoch_stats["iw_ll"] = iw_lls
+
+                # W&B Log epoch statistics as <phase>_epoch/<metric>
+                if self.args.logging:
+                    utils.reduce_and_log_epoch_stats(epoch_stats, phase, epoch, step,
+                                                     print_stats=self.args.print_stats)
+
+                if epoch_stats["total_loss"] < best_val_loss and phase == "valid":
+                    utils.make_checkpoint(self.vae_model, self.args, self.optimisers, epoch, step, best_val_loss)
+                    best_val_loss = epoch_stats["total_loss"]
+
+            # TODO: utils.log_mog(self.vae_model, self.args)
 
             epoch += 1
+
+            if self.args.short_dev_run and epoch == 2:
+                break
 
             if epoch == self.args.max_epochs:
                 break

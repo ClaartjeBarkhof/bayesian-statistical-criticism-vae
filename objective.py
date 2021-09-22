@@ -4,6 +4,7 @@ import torch.nn as nn
 import torch.distributions as td
 from pytorch_constrained_opt.constraint import Constraint
 from torch_two_sample import MMDStatistic
+from vae_model.distributions import AutoRegressiveDistribution
 
 
 class Objective(nn.Module):
@@ -64,7 +65,6 @@ class Objective(nn.Module):
             num_classes = 256
             labels = (x_in * (num_classes - 1)).long()
         else:
-            # TODO: for language should be something along the lines of x[:, 1:] (cutting of the start token)
             labels = x_in
 
         # Expected KL from prior to posterior (scalar)
@@ -77,23 +77,24 @@ class Objective(nn.Module):
         # Average over samples and batch: [S, B] -> scalar
         distortion = - log_p_x_z.mean()
 
+        self.free_bits_kl(p_z, q_z_x, z_post, free_bits=self.args.free_bits, per_dimension=False)  # TODO
+
         # Maximum mean discrepancy
         # z_post at this point is [S, B, D]
         # mmd = scalar tensor
         mmd = self.maximum_mean_discrepancy(z_post)
 
+        elbo = - (distortion + kl_prior_post)
+
         total_loss, mdr_loss, mdr_multiplier = None, None, None
 
         if self.args.objective == "AE":
-            #
             total_loss = distortion
 
         elif self.args.objective == "VAE":
-            #
-            total_loss = distortion + kl_prior_post
+            total_loss = -elbo
 
         elif self.args.objective == "BETA-VAE":
-            #
             total_loss = distortion + self.args.beta_beta
 
         elif self.args.objective == "MDR-VAE":
@@ -119,6 +120,7 @@ class Objective(nn.Module):
         loss_dict = dict(
             total_loss=total_loss,
             mmd=mmd,
+            elbo=elbo,
             mdr_loss=mdr_loss,
             mdr_multiplier=mdr_multiplier,
             distortion=distortion,
@@ -145,10 +147,52 @@ class Objective(nn.Module):
 
             kl = (log_q_z_x - log_p_z)
 
-        assert kl.shape == (batch_size, ), \
+        assert kl.shape == (batch_size,), \
             f"We assume kl_divergence to return one scalar per data point in the batch, current shape: {kl.shape}"
 
         return kl.mean()
+
+    @staticmethod
+    def free_bits_kl(self, p_z, q_z_x, z_post, free_bits=0.5, per_dimension=True):
+        # TODO: come up with solution for the fact that if p_z is of type MixtureSameFamily,
+        # TODO: the latent dimensions are automatically reduced due to the component distribution being of type Independent
+
+        if isinstance(q_z_x, AutoRegressiveDistribution):
+            (mean, scale) = q_z_x.params
+            mean, scale = mean[0, :, :], scale[0, :, :]
+
+        # Independent Normal
+        else:
+            mean, scale = q_z_x.base_dist.loc, q_z_x.base_dist.scale
+
+        # mean, scale = [B, D]
+
+        # average over the sample dim and latent dim: [S, B, D] - > [B]
+        log_q_z_x = td.Normal(mean, scale).log_prob(z_post).mean(dim=0).mean(dim=1)  # TODO: get rid of this second mean
+        log_p_z = p_z.log_prob(z_post).mean(dim=0)
+
+        kl = log_q_z_x - log_p_z
+
+        # TODO: reintroduce this if stement
+        # # [B, D] -> [B]
+        # if not per_dimension:
+        #     kl = kl.mean(dim=1)
+
+        # Ignore the dimensions of which the KL-div is already under the
+        # threshold, avoiding driving it down even further. Those values do
+        # not have to be replaced by the threshold because that would not mean
+        # anything to the gradient. That's why they are simply removed. This
+        # confused me at first.
+        kl_mask = (kl > free_bits).float()
+
+        kl_fb = kl * kl_mask
+
+        print("XXXXXX")
+        print("kl", kl)
+        print("kl_fb", kl_fb)
+        print("XXXXXX")
+
+        return kl_fb.mean()
 
     @staticmethod
     def maximum_mean_discrepancy(z_post):

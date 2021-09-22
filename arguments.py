@@ -26,9 +26,9 @@ def prepare_parser(jupyter=False, print_settings=True):
                         help="Beta in BETA-VAE objective.")
 
     # FB-VAE
-    parser.add_argument("--free_bits", default=0.5, type=float, help="The number of Free bits.")
-    parser.add_argument("--free_bits_per_dimension", default=True, type=lambda x: bool(distutils.util.strtobool(x)),
-                        help="Whether or not to apply the Free bits per dimension or with the dimensions combined.")
+    parser.add_argument("--free_bits", default=5.0, type=float, help="The number of Free bits.")
+    # TODO: parser.add_argument("--free_bits_per_dimension", default=True, type=lambda x: bool(distutils.util.strtobool(x)),
+    #                     help="Whether or not to apply the Free bits per dimension or with the dimensions combined.")
 
     # MDR-VAE
     parser.add_argument("--mdr_value", default=16.0, type=float,
@@ -173,8 +173,14 @@ def prepare_parser(jupyter=False, print_settings=True):
                         help="The name of the code dir, depending on LISA or local.")
     parser.add_argument("--job_id", default="", type=str,
                         help="...")
+    parser.add_argument("--short_dev_run", default=False, type=lambda x: bool(distutils.util.strtobool(x)),
+                        help="...")
+    parser.add_argument("--run_name_prefix", default="", type=str,
+                        help="A prefix to pre-pend to the run_name argument.")
     parser.add_argument("--run_name", default="", type=str,
                         help="Run name that will show up in W&B.")
+    parser.add_argument("--checkpoint_dir", default=get_code_dir()+"/train_jobs/checkpoints/", type=str,
+                        help="Which directories to save checkpoints at.")
     # parser.add_argument("--fast_dev_run", default=False, type=lambda x: bool(distutils.util.strtobool(x)),
     #                     help="Whether or not to perform a fast_dev_run.")
 
@@ -184,11 +190,12 @@ def prepare_parser(jupyter=False, print_settings=True):
         sys.argv = [sys.argv[0]]
 
     args = parser.parse_args()
+
+    os.makedirs(args.checkpoint_dir, exist_ok=True)
+
     args.run_name = make_run_name(args)
 
     check_settings(args)
-
-
 
     if print_settings: print_args(args)
 
@@ -216,9 +223,13 @@ def get_code_dir():
 
 
 def make_run_name(args):
-    name = f"{args.objective} | {args.image_dataset_name.upper()} ({args.data_distribution}) | Q_Z_X: {args.q_z_x_type} " \
-           f"P_Z: {args.p_z_type} P_X_Z: {args.p_x_z_type} DECODER-TYPE: {args.decoder_network_type}"
-    return name
+    # name = f"{args.objective} | {args.image_dataset_name.upper()} ({args.data_distribution}) | Q_Z_X: {args.q_z_x_type} " \
+    #        f"P_Z: {args.p_z_type} P_X_Z: {args.p_x_z_type} DECODER-TYPE: {args.decoder_network_type}"
+
+    name = f"q(z|x) {args.encoder_network_type} - {args.q_z_x_type} | p(x|z) {args.decoder_network_type}"
+
+    return args.run_name_prefix + name
+
 
 def check_settings(args):
     # DATA DISTRIBUTION / DATA SET CHOICES

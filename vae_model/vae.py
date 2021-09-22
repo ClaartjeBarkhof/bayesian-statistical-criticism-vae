@@ -71,6 +71,4 @@ class VaeModel(nn.Module):
 
             iw_lls = torch.cat(iw_lls)
 
-            iw_ll_mean, iw_ll_std = iw_lls.mean(), iw_lls.std()
-
-            return iw_ll_mean, iw_ll_std
+            return iw_lls.tolist()
