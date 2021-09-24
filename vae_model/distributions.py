@@ -49,19 +49,20 @@ class AutoRegressiveDistribution(nn.Module):
                 # [B, D]
                 context_x = self.context
 
-                # Loop for sample dimension
-                means, scales = [], []
-                for s in range(S):
-                    # [B, D*2]
-                    params = self.made(input_z[s, :, :], context=context_x)
-                    params_split = torch.chunk(params, 2, dim=1)
-                    mean, pre_scale = params_split[0], params_split[1]
-                    scale = F.softplus(pre_scale)
+                # [S*B, D]
+                input_z_2d = input_z.reshape(-1, D)
+                context_x_2d = context_x.repeat(S, 1)
 
-                    means.append(mean)
-                    scales.append(scale)
+                assert len(input_z_2d) == len(context_x_2d), "the shapes of x and z should match along dim = 0"
 
-                mean, scale = torch.stack(means, dim=0), torch.stack(scales, dim=0)
+                # [S*B, D*2]
+                params = self.made(input_z_2d, context=context_x_2d)
+                params_split = torch.chunk(params, 2, dim=1)
+                mean, pre_scale = params_split[0], params_split[1]
+                scale = F.softplus(pre_scale)
+
+                # Re-introduce the sample dimension
+                mean, scale = mean.reshape(S, B, D), scale.reshape(S, B, D)
 
             # [S, B]
             log_prob_z_x = td.Independent(td.Normal(loc=mean, scale=scale), 1).log_prob(input_z)
@@ -82,7 +83,9 @@ class AutoRegressiveDistribution(nn.Module):
             assert self.context.dim() == 3, f"We expect context Z to be 3D (S, B, D), current shape {self.context.shape}"
 
             (B, C, W, H) = input_x.shape
-            (S, _, D) = self.context.shape
+            (S, Bz, D) = self.context.shape
+
+            assert B == Bz, "Here we assume multiple samples z per data point x, so the B dimension should correspond."
 
             # flatten x [B, C, W, H] -> [B, C*W*H]
             input_x_flat = input_x.reshape(B, -1)
@@ -93,19 +96,17 @@ class AutoRegressiveDistribution(nn.Module):
                 # If input X is 2D, we assume the samples to correspond to multiple samples per data point
                 # [S, B, D]
                 context_z = self.context
+                context_z_2d = context_z.reshape(-1, D)
+                input_x_2d = input_x_flat.repeat(S, 1)
 
-                bern_logits = []
-                for s in range(S):
+                assert len(input_x_2d) == len(context_z_2d), "the shapes of x and z should match along dim = 0"
 
-                    # [B, C*W*H]
-                    bern_logits_s = self.made(input_x_flat, context=context_z[s, :, :])
+                # [S*B, C*W*H]
+                bern_logits = self.made(input_x_2d, context=context_z_2d)
 
-                    # [B, C*W*H] -> [B, C, W, H]
-                    bern_logits_s = bern_logits_s.reshape(B, C, W, H)
-                    bern_logits.append(bern_logits_s)
+                # [S*B, C*W*H] -> [S, B, C, W, H]
+                bern_logits = bern_logits.reshape(S, B, C, W, H)
 
-                # [S, B, C, W, H]
-                bern_logits = torch.stack(bern_logits, dim=0)
                 self.params = bern_logits
 
             # [S, B, C, W, H]
@@ -182,6 +183,9 @@ class AutoRegressiveDistribution(nn.Module):
         return z_samples
 
     def sample(self, sample_shape=(1,)):
+        # context z is (S, B, D)
+        # we are going to sample x, at least 1 per S*B
+
         assert len(self.X_shape) == 3, f"we expected X_shape to be (C, W, H), currently given {self.X_shape}"
         assert not self.encoder and self.dist_type != "gaussian", "sample() can only be used by non Gaussian decoders"
 
@@ -190,27 +194,28 @@ class AutoRegressiveDistribution(nn.Module):
         x_dim_flat = int(C * W * H)
         context_z = self.context
         (S, B, D) = context_z.shape
+        Sx = sample_shape[0]
 
-        x_samples = []
+        # [S, B, D] -> [S, B, Sx, D] -> [S*B*Sx, D]
+        context_z_2d = context_z.unsqueeze(2).repeat(1, 1, Sx, D).reshape(-1, D)
 
-        for s in range(S):
-            # [B, X_dim]
-            x_sample = torch.zeros((B, x_dim_flat), device=self.context.device)
+        # [S, B, Sx, X_dim]
+        x_sample = torch.zeros((S, B, Sx, x_dim_flat), device=self.context.device)
+        x_sample_2d = x_sample.reshape(-1, x_dim_flat)
 
-            for d in range(x_dim_flat):
-                # x [B, X_dim] + context [B, D] -> logits [B, X_dim]
-                logits = self.made(x_sample, context=context_z[s, :, :])
-                # [B, X_dim]
-                x_sample_d = td.Bernoulli(logits=logits).sample()
-                x_sample[:, d] = x_sample_d[:, d]
+        for d in range(x_dim_flat):
+            # x [S*B*Sx, X_dim] + context z [S*B*Sx, D] -> logits [S*B*Sx, X_dim]
+            logits = self.made(x_sample_2d, context=context_z_2d)
 
-            x_samples.append(x_sample)
+            # [S*B*Sx, X_dim]
+            x_sample_dim = td.Bernoulli(logits=logits).sample()
+            x_sample_2d[:, d] = x_sample_dim[:, d]
 
-        # [S, B, X_dim_flat]
-        x_samples = torch.stack(x_samples, dim=0)
+        # [S, B, Sx, X_dim_flat]
+        x_sample_2d = x_sample_2d.reshape(S, B, Sx, x_dim_flat)
 
-        # [S, B, X_dim_flat] -> [S, B, C, W, H]
-        x_samples = x_samples.reshape(S, B, C, W, H)
+        # [S, B, X_dim_flat] -> [S, B, Sx, C, W, H]
+        x_samples = x_sample_2d.reshape(S, B, Sx, C, W, H)
 
         return x_samples
 
