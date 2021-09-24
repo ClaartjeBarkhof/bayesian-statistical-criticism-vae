@@ -91,9 +91,19 @@ class ImageDataset:
                                   num_workers=self.num_workers)
         return train_loader
 
-    def valid_loader(self):
-        valid_loader = DataLoader(self.valid_set, batch_size=self.batch_size, shuffle=False,
-                                  num_workers=self.num_workers)
+    def valid_loader(self, num_workers=None, batch_size=None):
+        if num_workers is not None:
+            workers = num_workers
+        else:
+            workers = self.num_workers
+
+        if batch_size is not None:
+            b = batch_size
+        else:
+            b = self.batch_size
+
+        valid_loader = DataLoader(self.valid_set, batch_size=b, shuffle=False,
+                                  num_workers=workers)
         return valid_loader
 
     def test_loader(self):

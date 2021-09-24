@@ -3,6 +3,8 @@ import torch
 import collections
 import numpy as np
 from tabulate import tabulate
+from vae_model.vae import VaeModel
+from arguments import prepare_parser
 
 
 def init_logging(vae_model, args):
@@ -51,17 +53,15 @@ def insert_epoch_stats(epoch_stats, loss_dict):
 
 def reduce_and_log_epoch_stats(epoch_stats, phase, epoch, step, print_stats=True):
     print_list = []
+    mean_reduced = dict()
     wandb_log_dict = {}
 
-    mean_val_loss = None
     for i, (k, v) in enumerate(epoch_stats.items()):
         mean, std = np.mean(v), np.std(v)
+        mean_reduced[k] = mean
         wandb_log_dict[f"{phase}_epoch/{k} std"] = std
         wandb_log_dict[f"{phase}_epoch/{k} mean"] = mean
         print_list.append([i, k, f"{mean:.2f}", f"{std:.2f}"])
-
-        if phase == "valid" and k == "total_loss":
-            mean_val_loss = mean
 
     wandb_log_dict["epoch"] = epoch
     wandb_log_dict["global step"] = step
@@ -74,7 +74,7 @@ def reduce_and_log_epoch_stats(epoch_stats, phase, epoch, step, print_stats=True
         print(tabulate(print_list, headers=["", "Metric", "Epoch mean", "Epoch std."]))
         print("---------------------------------------------")
 
-    return mean_val_loss
+    return mean_reduced
 
 
 def make_nested_dict():
@@ -134,18 +134,21 @@ def determine_device(args):
     return device_name
 
 
-def make_checkpoint(model, args, optimisers, epoch, step, best_val_loss):
+def make_checkpoint(model, args, optimisers, epoch, step, mean_reduced_epoch_stats):
     c_path = f"{args.checkpoint_dir}{args.run_name}.pt"
     # , saving checkpoint at:\n{c_path}
     print()
     print("*"*40)
+    best_val_loss = mean_reduced_epoch_stats["total_loss"]
     print(f"Found new best validation loss {best_val_loss:.2f}")
     print("*" * 40)
     print()
 
     state = {
         'best_val_loss': best_val_loss,
+        'mean_epoch_stats': mean_reduced_epoch_stats,
         'epoch': epoch,
+        'args': args,
         'step': step,
         'state_dict': model.state_dict(),
     }
@@ -154,3 +157,32 @@ def make_checkpoint(model, args, optimisers, epoch, step, best_val_loss):
         state[opt_name] = opt.state_dict()
 
     torch.save(state, c_path)
+
+
+def load_checkpoint_model_for_eval(checkpoint_path):
+    checkpoint = torch.load(checkpoint_path)
+
+    if "args" in checkpoint:
+        args = checkpoint["args"]
+    else:
+        args = prepare_parser(print_settings=False, jupyter=True)
+        args.latent_dim = 10
+        args.encoder_network_type = checkpoint_path.split(" ")[1]
+        args.q_z_x_type = checkpoint_path.split(" ")[3]
+        args.decoder_network_type = checkpoint_path.split(" ")[6]
+
+    vae_model = VaeModel(args=args)
+    vae_model.load_state_dict(checkpoint["state_dict"])
+    vae_model.eval()
+
+    if "mean_epoch_stats" in checkpoint:
+        p_str = ""
+        for k, v in checkpoint["mean_epoch_stats"].items():
+            p_str += f"{k}: {v:.2f} | "
+        print(p_str)
+    else:
+        l = checkpoint["best_val_loss"]
+        print(f"best val loss {l:.2f}")
+
+    return vae_model
+

@@ -96,7 +96,7 @@ class Trainer:
     def train(self):
         epoch, step = 0, 0
 
-        best_val_loss, mean_val_loss = 10000.0, None
+        best_val_loss, mean_reduced_epoch_stats = 10000.0, None
 
         for epoch in range(1000):
             for phase in ["train", "valid"]:
@@ -139,14 +139,14 @@ class Trainer:
 
                 # W&B Log epoch statistics as <phase>_epoch/<metric>
                 if self.args.logging:
-                    mean_val_loss = utils.reduce_and_log_epoch_stats(epoch_stats, phase, epoch, step,
-                                                                     print_stats=self.args.print_stats)
+                    mean_reduced_epoch_stats = utils.reduce_and_log_epoch_stats(epoch_stats, phase, epoch, step,
+                                                                                print_stats=self.args.print_stats)
 
-                if phase == "valid" and mean_val_loss is not None:
-                    if mean_val_loss < best_val_loss:
-                        best_val_loss = mean_val_loss
+                if phase == "valid" and mean_reduced_epoch_stats is not None:
+                    if mean_reduced_epoch_stats["total_loss"] < best_val_loss:
+                        best_val_loss = mean_reduced_epoch_stats["total_loss"]
                         if self.args.checkpointing:
-                            utils.make_checkpoint(self.vae_model, self.args, self.optimisers, epoch, step, best_val_loss)
+                            utils.make_checkpoint(self.vae_model, self.args, self.optimisers, epoch, step, mean_reduced_epoch_stats)
 
             # TODO: utils.log_mog(self.vae_model, self.args)
 

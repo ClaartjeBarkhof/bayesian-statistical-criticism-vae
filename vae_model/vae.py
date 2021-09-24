@@ -3,6 +3,7 @@ from .inference_model import InferenceModel
 import torch.nn as nn
 import torch
 import numpy as np
+import torch.distributions as td
 
 
 class VaeModel(nn.Module):
@@ -37,7 +38,50 @@ class VaeModel(nn.Module):
 
         return q_z_x, z_post, p_z, p_x_z
 
-    def estimate_log_likelihood(self, data_loader, n_samples=10, max_batches=None, short_dev_run=False):
+    def reconstruct(self, x_in, n_x_samples=10):
+        q_z_x, z_post, p_z, p_x_z = self.forward(x_in, n_samples=1)
+        return p_x_z.sample(sample_shape=(n_x_samples,))
+
+    def estimate_log_likelihood_batch(self, x_in, n_samples=10, per_bit=False):
+        # dist, [S, B, D], dist, dist
+        q_z_x, z_post, p_z, p_x_z = self(x_in, n_samples=n_samples)
+
+        # [S, B]
+        log_q_z_x = q_z_x.log_prob(z_post)
+        log_p_z = p_z.log_prob(z_post)
+
+        n_samples = log_p_z.shape[0]
+
+        # [B, X_dim]
+        if per_bit:
+            # Independent Bernoulli
+            if isinstance(p_x_z, td.Independent):
+                logits = p_x_z.base_dist.logits
+            # AutoregressiveDist
+            else:
+                # just to get the logits
+                if p_x_z.params is None:
+                    _ = p_x_z.log_prob(x_in)
+                logits = p_x_z.params
+                print("LOGITS SHAPE", logits.shape)
+            # Logits shape [S, B, C, H, W]
+            log_p_x_z = td.Independent(td.Bernoulli(logits=logits), 0).log_prob(x_in)
+            iw_frac = log_p_x_z + log_p_z.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1) - log_q_z_x.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
+
+            iw_ll = torch.logsumexp(iw_frac, dim=0) - np.log(n_samples)
+        # [B]
+        else:
+            log_p_x_z = p_x_z.log_prob(x_in)
+            iw_frac = log_p_x_z + log_p_z - log_q_z_x
+
+            # Reduce the sample dimension with logsumexp
+            # [B]
+
+            iw_ll = torch.logsumexp(iw_frac, dim=0) - np.log(n_samples)
+
+        return iw_ll
+
+    def estimate_log_likelihood_dataset(self, data_loader, n_samples=10, max_batches=None, short_dev_run=False):
         self.eval()
 
         iw_lls = []
@@ -49,20 +93,7 @@ class VaeModel(nn.Module):
                 x_in = batch[0]
                 x_in = x_in.to(self.device)
 
-                # dist, [S, B, D], dist, dist
-                q_z_x, z_post, p_z, p_x_z = self(x_in, n_samples=n_samples)
-
-                # [S, B]
-                log_q_z_x = q_z_x.log_prob(z_post)
-                log_p_z = p_z.log_prob(z_post)
-                log_p_x_z = p_x_z.log_prob(x_in)
-
-                n_samples = log_p_x_z.shape[0]
-                iw_frac = log_p_x_z + log_p_z - log_q_z_x
-
-                # Reduce the sample dimension with logsumexp
-                # [B]
-                iw_ll = torch.logsumexp(iw_frac, dim=0) - np.log(n_samples)
+                iw_ll = self.estimate_log_likelihood_batch(x_in=x_in, n_samples=n_samples)
 
                 iw_lls.append(iw_ll)
 

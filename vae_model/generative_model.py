@@ -48,10 +48,12 @@ class GenerativeModel(nn.Module):
         self.p_x_z_type = args.data_distribution
 
     def sample_generative_model(self, S=1):
-        z_prior = self.sample_prior(S=S)
+        # [S, 1, D] -> [1, S, D] (make the sample dim the batch dim)
+        z_prior = self.sample_prior(S=S).permute(1, 0, 2)
         p_x_z_prior = self.p_x_z(z_prior)
-        sample = p_x_z_prior.sample()
-        return sample
+        sampled_x = p_x_z_prior.sample()
+
+        return sampled_x
 
     def forward(self, z_post, x_in=None):
         """
@@ -158,6 +160,7 @@ class ConditionalBernoulliBlockMADE(nn.Module):
     def __init__(self, args):
         super(ConditionalBernoulliBlockMADE, self).__init__()
 
+        self.X_shape = (args.n_channels, args.image_w_h, args.image_w_h)
         self.X_dim = args.image_w_h * args.image_w_h * args.n_channels
         self.D = args.latent_dim
 
@@ -170,7 +173,8 @@ class ConditionalBernoulliBlockMADE(nn.Module):
 
     def forward(self, z):
         # Placeholder distribution object
-        p_x_z = AutoRegressiveDistribution(context=z, made=self.made, dist_type="bernoulli", encoder=False)
+        p_x_z = AutoRegressiveDistribution(context=z, made=self.made, dist_type="bernoulli",
+                                           encoder=False, X_shape=self.X_shape)
 
         return p_x_z
 

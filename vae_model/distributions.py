@@ -5,7 +5,7 @@ import torch.distributions as td
 
 
 class AutoRegressiveDistribution(nn.Module):
-    def __init__(self, context, made, dist_type="gaussian", sample=None, params=None, encoder=True):
+    def __init__(self, context, made, dist_type="gaussian", samples=None, params=None, encoder=True, X_shape=(1, 28, 28)):
         super(AutoRegressiveDistribution, self).__init__()
 
         assert dist_type in ["gaussian", "bernoulli"], \
@@ -23,10 +23,11 @@ class AutoRegressiveDistribution(nn.Module):
         self.made = made
         # Sample dim: latent_dim (D) or image dim (C x H x W)
         self.x_z_dim = self.made.nin
+        self.X_shape = X_shape
 
         # Gaussian: sample z [S, B, D], params (mu, scale): ([S, B, D], [S, B, D])
         # Bernoulli sample x [B, X_dim], params (logits): [S, B, X_dim]
-        self.sample = sample
+        self.samples = samples
         self.params = params
 
     def log_prob(self, x_z, mean_reduce_sample_dim=False):
@@ -175,18 +176,18 @@ class AutoRegressiveDistribution(nn.Module):
         z_samples = torch.stack(z_samples, dim=0)
 
         # All [S, B, D]
-        self.sample = z_samples
+        self.samples = z_samples
         self.params = (mus, scales)
 
         return z_samples
 
-    def sample(self, X_shape, sample_shape=(1,)):
-        assert len(X_shape) == 4, f"we expected X_shape to be (B, C, W, H), currently given {X_shape}"
+    def sample(self, sample_shape=(1,)):
+        assert len(self.X_shape) == 3, f"we expected X_shape to be (C, W, H), currently given {self.X_shape}"
         assert not self.encoder and self.dist_type != "gaussian", "sample() can only be used by non Gaussian decoders"
 
         # [S, B, D]
-        B, C, W, H = X_shape
-        X_dim_flat = C * W * H
+        C, W, H = self.X_shape
+        x_dim_flat = int(C * W * H)
         context_z = self.context
         (S, B, D) = context_z.shape
 
@@ -194,16 +195,16 @@ class AutoRegressiveDistribution(nn.Module):
 
         for s in range(S):
             # [B, X_dim]
-            x_sample = torch.zeros((B, X_dim_flat), device=self.context.device)
+            x_sample = torch.zeros((B, x_dim_flat), device=self.context.device)
 
-            for d in range(X_dim_flat):
+            for d in range(x_dim_flat):
                 # x [B, X_dim] + context [B, D] -> logits [B, X_dim]
                 logits = self.made(x_sample, context=context_z[s, :, :])
                 # [B, X_dim]
                 x_sample_d = td.Bernoulli(logits=logits).sample()
-                x_sample = x_sample_d[:, d]
+                x_sample[:, d] = x_sample_d[:, d]
 
-            x_samples.append(x_samples)
+            x_samples.append(x_sample)
 
         # [S, B, X_dim_flat]
         x_samples = torch.stack(x_samples, dim=0)
