@@ -196,26 +196,26 @@ class AutoRegressiveDistribution(nn.Module):
         (S, B, D) = context_z.shape
         Sx = sample_shape[0]
 
-        # [S, B, D] -> [S, B, Sx, D] -> [S*B*Sx, D]
-        context_z_2d = context_z.unsqueeze(2).repeat(1, 1, Sx, D).reshape(-1, D)
+        # [S, B, D] -> [Sx, S, B, D] -> [Sx*B*S, D]
+        context_z_2d = context_z.unsqueeze(2).repeat(Sx, 1, 1, 1).reshape(-1, D)
 
-        # [S, B, Sx, X_dim]
-        x_sample = torch.zeros((S, B, Sx, x_dim_flat), device=self.context.device)
+        # [Sx, B, S, X_dim] -> [Sx*B*D, X_dim]
+        x_sample = torch.zeros((Sx, S, B, x_dim_flat), device=self.context.device)
         x_sample_2d = x_sample.reshape(-1, x_dim_flat)
 
         for d in range(x_dim_flat):
-            # x [S*B*Sx, X_dim] + context z [S*B*Sx, D] -> logits [S*B*Sx, X_dim]
+            # x [Sx*B*S, X_dim] + context z [Sx*B*S, D] -> logits [Sx*B*S, X_dim]
             logits = self.made(x_sample_2d, context=context_z_2d)
 
-            # [S*B*Sx, X_dim]
+            # [Sx*B*S, X_dim]
             x_sample_dim = td.Bernoulli(logits=logits).sample()
             x_sample_2d[:, d] = x_sample_dim[:, d]
 
-        # [S, B, Sx, X_dim_flat]
-        x_sample_2d = x_sample_2d.reshape(S, B, Sx, x_dim_flat)
+        # [Sx, S, B, X_dim_flat]
+        x_sample_2d = x_sample_2d.reshape(Sx, S, B, x_dim_flat)
 
-        # [S, B, X_dim_flat] -> [S, B, Sx, C, W, H]
-        x_samples = x_sample_2d.reshape(S, B, Sx, C, W, H)
+        # [Sx*S*B, X_dim_flat] -> [Sx, S, B, C, W, H]
+        x_samples = x_sample_2d.reshape(Sx, S, B, C, W, H)
 
         return x_samples
 

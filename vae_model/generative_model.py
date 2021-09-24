@@ -47,11 +47,12 @@ class GenerativeModel(nn.Module):
         # OUTPUT DISTRIBUTION == DATA DISTRIBUTION
         self.p_x_z_type = args.data_distribution
 
-    def sample_generative_model(self, S=1):
-        # [S, 1, D] -> [1, S, D] (make the sample dim the batch dim)
-        z_prior = self.sample_prior(S=S).permute(1, 0, 2)
+    def sample_generative_model(self, Sx=1, Sz=1):
+        # [S, 1, D]
+        z_prior = self.sample_prior(S=Sz)
+
         p_x_z_prior = self.p_x_z(z_prior)
-        sampled_x = p_x_z_prior.sample()
+        sampled_x = p_x_z_prior.sample(sample_shape=(Sx,))
 
         return sampled_x
 

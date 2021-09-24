@@ -38,9 +38,9 @@ class VaeModel(nn.Module):
 
         return q_z_x, z_post, p_z, p_x_z
 
-    def reconstruct(self, x_in, n_x_samples=10):
-        q_z_x, z_post, p_z, p_x_z = self.forward(x_in, n_samples=1)
-        return p_x_z.sample(sample_shape=(n_x_samples,))
+    def reconstruct(self, x_in, Sx=10, Sz=1):
+        q_z_x, z_post, p_z, p_x_z = self.forward(x_in, n_samples=Sz)
+        return p_x_z.sample(sample_shape=(Sx,))
 
     def estimate_log_likelihood_batch(self, x_in, n_samples=10, per_bit=False):
         # dist, [S, B, D], dist, dist
@@ -63,8 +63,8 @@ class VaeModel(nn.Module):
                 if p_x_z.params is None:
                     _ = p_x_z.log_prob(x_in)
                 logits = p_x_z.params
-                print("LOGITS SHAPE", logits.shape)
-            # Logits shape [S, B, C, H, W]
+
+            # Logits shape [S, B,  C, H, W]
             log_p_x_z = td.Independent(td.Bernoulli(logits=logits), 0).log_prob(x_in)
             iw_frac = log_p_x_z + log_p_z.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1) - log_q_z_x.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
 
