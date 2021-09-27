@@ -34,7 +34,7 @@ class VaeModel(nn.Module):
         p_x_z = self.gen_model(x_in=x_in, z_post=z_post)  # distribution-like object
 
         # Get the prior of the generative model
-        p_z = self.gen_model.p_z  # distribution object
+        p_z = self.gen_model.get_p_z()  # distribution object
 
         return q_z_x, z_post, p_z, p_x_z
 

@@ -38,15 +38,20 @@ class GenerativeModel(nn.Module):
         # MIXTURE OF GAUSIANS PRIOR
         if self.p_z_type == "mog":
             self.mog_n_components = args.mog_n_components
-            self.mix_components = torch.nn.Parameter(torch.rand(self.mog_n_components))
-            self.component_means = torch.nn.Parameter(torch.randn(self.mog_n_components, self.D))
-            self.component_scales = torch.nn.Parameter(torch.abs(torch.randn(self.mog_n_components, self.D)))
 
-            self.register_parameter("param_mix_components", self.mix_components)
-            self.register_parameter("param_component_means", self.component_means)
-            self.register_parameter("param_component_scales", self.component_scales)
+            # self.mix_components = torch.nn.Parameter(torch.rand(self.mog_n_components))
+            # self.component_means = torch.nn.Parameter(torch.randn(self.mog_n_components, self.D))
+            # self.component_scales = torch.nn.Parameter(torch.abs(torch.randn(self.mog_n_components, self.D)))
 
-        self.p_z = self.init_p_z()
+            self.register_parameter("mix_components", torch.nn.Parameter(torch.rand(self.mog_n_components)))
+            self.register_parameter("component_means", torch.nn.Parameter(torch.randn(self.mog_n_components, self.D)))
+            self.register_parameter("component_pre_scales", torch.nn.Parameter(torch.abs(torch.randn(self.mog_n_components, self.D))))
+
+        else:
+            self.register_buffer("prior_z_means", torch.zeros(self.D, requires_grad=False))
+            self.register_buffer("prior_z_scales",  torch.ones(self.D, requires_grad=False))
+
+        #self.p_z = self.init_p_z()
 
         # OUTPUT DISTRIBUTION == DATA DISTRIBUTION
         self.p_x_z_type = args.data_distribution
@@ -94,7 +99,7 @@ class GenerativeModel(nn.Module):
             z_prior: [S, 1, D]
                 samples from the prior of dimensionality of the latent space.
         """
-        z_prior = self.p_z.sample(sample_shape=(S, 1))
+        z_prior = self.get_p_z().sample(sample_shape=(S, 1))
 
         return z_prior
 
@@ -134,17 +139,15 @@ class GenerativeModel(nn.Module):
 
         return p_x_z
 
-    def init_p_z(self):
+    def get_p_z(self):
         # ISOTROPIC GAUSSIAN
         if self.p_z_type == "isotropic_gaussian":
-            return td.Independent(
-                td.Normal(loc=torch.zeros(self.D, device=self.device), scale=torch.ones(self.D, device=self.device)), 1)
+            return td.Independent(td.Normal(loc=self.prior_z_means, scale=self.prior_z_scales), 1)
 
         # MIXTURE OF GAUSSIANS
         elif self.p_z_type == "mog":
-            mix = td.Categorical(self.mix_components)
-            comp = td.Independent(td.Normal(self.component_means, F.softplus(self.component_scales)), 1)
-
+            mix = td.Categorical(logits=self.mix_components)
+            comp = td.Independent(td.Normal(self.component_means, F.softplus(self.component_pre_scales)), 1)
             return td.MixtureSameFamily(mix, comp)
         else:
             raise ValueError(f"{self.p_z_type} is not a valid p_z_type, choices: isotropic_gaussian, mog")

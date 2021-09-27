@@ -64,7 +64,7 @@ class Trainer:
 
         q_z_x, z_post, p_z, p_x_z = self.vae_model(x_in)
 
-        loss_dict = self.objective.compute_loss(x_in, q_z_x, z_post, p_z, p_x_z, self.vae_model)
+        loss_dict = self.objective.compute_loss(x_in, q_z_x, z_post, p_z, p_x_z)
 
         return loss_dict
 
