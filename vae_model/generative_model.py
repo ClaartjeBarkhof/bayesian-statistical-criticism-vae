@@ -42,6 +42,10 @@ class GenerativeModel(nn.Module):
             self.component_means = torch.nn.Parameter(torch.randn(self.mog_n_components, self.D))
             self.component_scales = torch.nn.Parameter(torch.abs(torch.randn(self.mog_n_components, self.D)))
 
+            self.register_parameter("param_mix_components", self.mix_components)
+            self.register_parameter("param_component_means", self.component_means)
+            self.register_parameter("param_component_scales", self.component_scales)
+
         self.p_z = self.init_p_z()
 
         # OUTPUT DISTRIBUTION == DATA DISTRIBUTION

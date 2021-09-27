@@ -145,14 +145,14 @@ class Objective(nn.Module):
             log_q_z_x = q_z_x.log_prob(z_post).mean(dim=0)
 
 
-            if isinstance(p_z, td.MixtureSameFamily):
-                mix = td.Categorical(vae_model.gen_model.mix_components)
-                comp = td.Independent(td.Normal(vae_model.gen_model.component_means, torch.nn.functional.softplus(vae_model.gen_model.component_scales)), 1)
-                p_z_ = td.MixtureSameFamily(mix, comp)
-                log_p_z = p_z_.log_prob(z_post).mean(dim=0)
-                print("log_p_z.shape", log_p_z.shape)
-            else:
-                log_p_z = p_z.log_prob(z_post).mean(dim=0)
+            # if isinstance(p_z, td.MixtureSameFamily):
+            #     mix = td.Categorical(vae_model.gen_model.mix_components)
+            #     comp = td.Independent(td.Normal(vae_model.gen_model.component_means, torch.nn.functional.softplus(vae_model.gen_model.component_scales)), 1)
+            #     p_z_ = td.MixtureSameFamily(mix, comp)
+            #     log_p_z = p_z_.log_prob(z_post).mean(dim=0)
+            #     print("log_p_z.shape", log_p_z.shape)
+            # else:
+            log_p_z = p_z.log_prob(z_post).mean(dim=0)
 
             kl = (log_q_z_x - log_p_z)
 
