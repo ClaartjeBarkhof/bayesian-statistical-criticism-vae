@@ -118,7 +118,7 @@ class ConditionalGaussianBlockMADE(nn.Module):
         act = nn.ReLU()
 
         self.made = MADE(nin=self.D, hidden_sizes=hiddens, nout=int(self.D * 2), natural_ordering=natural_ordering,
-                         context_size=256, hidden_activation=act)  # no additional context here
+                         context_size=256, hidden_activation=act, gating=False)
 
     def forward(self, q_z_x_params):
         # Placeholder distribution object

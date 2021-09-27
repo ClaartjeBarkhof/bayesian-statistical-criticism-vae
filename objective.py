@@ -5,6 +5,7 @@ import torch.distributions as td
 from pytorch_constrained_opt.constraint import Constraint
 from torch_two_sample import MMDStatistic
 from vae_model.distributions import AutoRegressiveDistribution
+import numpy as np
 
 
 class Objective(nn.Module):
@@ -116,6 +117,8 @@ class Objective(nn.Module):
             # TODO: https://github.com/ermongroup/lagvae/blob/master/methods/lagvae.py
             raise NotImplementedError
 
+        posterior_stats = self.get_posterior_stats(q_z_x, z_post)
+
         loss_dict = dict(
             total_loss=total_loss,
             mmd=mmd,
@@ -125,6 +128,8 @@ class Objective(nn.Module):
             distortion=distortion,
             kl_prior_post=kl_prior_post
         )
+
+        loss_dict = {**loss_dict, **posterior_stats}
 
         return loss_dict
 
@@ -140,6 +145,10 @@ class Objective(nn.Module):
             kl = kl_divergence(q_z_x, p_z)
 
         else:
+            print("Z_post.shape", z_post.shape)
+            print("p_z", p_z)
+            print("q_z_x", q_z_x)
+
             # [S, B] -> [B]
             log_q_z_x = q_z_x.log_prob(z_post).mean(dim=0)
 
@@ -202,3 +211,41 @@ class Objective(nn.Module):
         tts_mmd = MMD_stat(z_post, prior_sample, alphas, ret_matrix=False)
 
         return tts_mmd
+
+    @staticmethod
+    def get_posterior_stats(q_z_x, z_post):
+        if isinstance(q_z_x, td.Independent):
+            mean, scale = q_z_x.base_dist.loc, q_z_x.base_dist.scale
+        else:
+            (mean, scale) = q_z_x.params
+
+        # [1, B, D] -> [B, D]
+        mean = mean.squeeze(0)
+        scale = scale.squeeze(0)
+
+        mean_mean = mean.mean()
+        std_across_x_mean = torch.std(mean, dim=0).mean()
+        std_across_z_mean = torch.std(mean, dim=1).mean()
+
+        mean_scale = scale.mean()
+        std_across_x_scale = torch.std(scale, dim=0).mean()
+        std_across_z_scale = torch.std(scale, dim=1).mean()
+
+        # Log determinant of the covariance matrix of q_z_x
+        # metric from InfoVAE paper (Zhao et al.)
+        # for np.cov, the observation dimension is expected to be the column dimension
+        z_post_np = z_post.squeeze(0).detach().cpu().numpy().transpose()
+        cov = np.cov(z_post_np)
+        log_det_cov_q_z = np.log(np.linalg.det(cov))
+
+        d = dict(
+            mean_mean=mean_mean,
+            std_across_x_mean=std_across_x_mean,
+            std_across_z_mean=std_across_z_mean,
+            mean_scale=mean_scale,
+            std_across_x_scale=std_across_x_scale,
+            std_across_z_scale=std_across_z_scale,
+            log_det_cov_q_z=log_det_cov_q_z
+        )
+
+        return d

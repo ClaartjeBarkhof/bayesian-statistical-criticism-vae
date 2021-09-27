@@ -5,6 +5,7 @@ from dataset_dataloader import ImageDataset
 from vae_model.distributions import AutoRegressiveDistribution
 import numpy as np
 import scipy.stats
+from scipy.stats import chisquare
 
 
 def collect_encodings(vae_model, data_X, Sz=1):
@@ -40,7 +41,7 @@ def get_n_data_samples_x_y(image_dataset_name="bmnist", N_samples=500):
     return data_X[:N_samples], data_y[:N_samples]
 
 
-def build_posterior_analysis_grid(vae_model, plot_name, plot_dir, data_X, data_y, n_sampled_reconstructions=5):
+def plot_posterior_analysis_grid(vae_model, plot_name, plot_dir, data_X, data_y, n_sampled_reconstructions=5):
     with torch.no_grad():
 
         # data sample, iw ll, ...sampled_reconstructions...
@@ -75,43 +76,103 @@ def build_posterior_analysis_grid(vae_model, plot_name, plot_dir, data_X, data_y
         plt.show()
 
 
-def build_prior_analysis_grid(vae_model, plot_name, plot_dir, knn_classifier, n_generative_samples, data_X, data_y,
-                              show_n_samples=5):
+def do_prior_analysis(vae_model, knn_classifier,  data_X, data_y, gen_batch_size=100, gen_n_batches=10):
+    vae_model.eval()
+
     with torch.no_grad():
-        # Draw samples x ~ p(z)p(x|z)
+        all_samples, all_knn_preds = [], []
 
-        # [Sx=1, Sz=500, B=1, C, W, H] -> [n_generative_samples, C, W, H]
-        s = vae_model.gen_model.sample_generative_model(Sz=n_generative_samples, Sx=1)
-        s = s.squeeze(2).squeeze(0)  # squeeze B and Sx
+        for batch_idx in range(gen_n_batches):
+            # Draw samples x ~ p(z)p(x|z)
 
-        # Make flat Numpy vectors
-        # [n_generative_samples, C * W * H] = [n_generative_samples, 768]
-        samples_flat_np = s.reshape(s.shape[0], -1).numpy()
+            # [Sx=1, Sz=500, B=1, C, W, H] -> [n_generative_samples, C, W, H]
+            s = vae_model.gen_model.sample_generative_model(Sz=gen_batch_size, Sx=1)
+            s = s.squeeze(2).squeeze(0)  # squeeze B and Sx
 
-        # [n_generative_samples]
-        preds = knn_classifier.predict(samples_flat_np)
+            # Make flat Numpy vectors
+            # [n_generative_samples, C * W * H] = [n_generative_samples, 768]
+            samples_flat_np = s.reshape(s.shape[0], -1).numpy()
 
-        cols = show_n_samples + 2
+            # [n_generative_samples]
+            preds = knn_classifier.predict(samples_flat_np)
+
+            all_samples.append(samples_flat_np)
+            all_knn_preds.append(preds)
+
+        all_samples = np.concatenate(all_samples, axis=0)
+        all_knn_preds = np.concatenate(all_knn_preds)
+
+        print("all_samples.shape, all_knn_preds.shape", all_samples.shape, all_knn_preds.shape)
+
+        d = dict(samples=None, data=None, metrics=None)
+
+        for digit in range(10):
+            select_digit_data = data_X[data_y == digit]
+            avg_data_point = select_digit_data.mean(axis=0)
+            p_data_digit = len(data_X[data_y == digit]) / len(data_X)
+
+            select_digit_samples = all_samples[all_knn_preds == digit]
+            avg_sample = select_digit_samples.mean(axis=0)
+            p_gen_digit = len(select_digit_samples) / len(all_samples)
+
+            l2_d = np.linalg.norm(avg_data_point - avg_sample)
+
+            d["samples"][digit] = select_digit_samples
+            d["data"][digit] = select_digit_data
+            d["digit_metrics"][digit] = {
+                "avg_sample": avg_sample,
+                "avg_data": avg_data_point,
+                "l2_avg_sample_avg_data": l2_d,
+                "frac_data_of_digit_class": p_data_digit,
+                "frac_samples_digit_class": p_gen_digit,
+            }
+
+        unique, counts = np.unique(all_knn_preds, return_counts=True)
+        obs_freq = counts / len(all_knn_preds)
+        assert len(unique) == 10, "not all classes in generative samples, perhaps try with more samples!"
+        ref_unif_fre = np.array([0.1 for _ in range(10)])
+        chi = chisquare(obs_freq, ref_unif_fre)
+        chi_stat, chi_p = chi.statistic, chi.pvalue
+
+        d["chi_stat"] = chi_stat
+        d["obs_freq"] = obs_freq
+        d["chi_pvalue"] = chi_p
+
+        return d
+
+
+def plot_prior_analysis_grid(vae_model, plot_name, plot_dir, knn_classifier, data_X, data_y,
+                             n_recon_samples=5, gen_batch_size=100, gen_n_batches=10):
+    with torch.no_grad():
+        d = do_prior_analysis(vae_model, knn_classifier, data_X, data_y,
+                              gen_batch_size=gen_batch_size, gen_n_batches=gen_n_batches)
+
+        cols = n_recon_samples + 1
+
         fig, axs = plt.subplots(ncols=cols, nrows=10, figsize=(cols * 1.5, 10 * 1.5))
 
         for digit in range(10):
-            avg_data_point = data_X[data_y == digit].mean(axis=0).reshape(28, 28)
-            p = len(data_X[data_y == digit]) / len(data_X)
-            axs[digit, 0].imshow(avg_data_point, cmap="Greys")
-            axs[digit, 0].set_title(f"Avg. data digit {digit} p: {p:.2f}", y=1.03)
+            # Plot average data sample belonging to this digit class
+            axs[digit, 0].imshow(d["digit_metrics"][digit]["avg_data"].reshape(28, 28), cmap="Greys")
+            axs[digit, 0].set_title(f"Avg. data digit {digit} p: {p_data:.2f}", y=1.03)
 
-            select_digit_samples = samples_flat_np[preds == digit]
-            p = len(select_digit_samples) / len(samples_flat_np)
-            for c in range(1, show_n_samples + 1):
-                if c == (show_n_samples // 2) + 1:
+            # Get some stats
+            p_data = d["digit_metrics"][digit]["frac_data_of_digit_class"]
+            p_gen = d["digit_metrics"][digit]["frac_samples_digit_class"]
+            l2 = d["digit_metrics"][digit]["l2_avg_sample_avg_data"]
+
+            # Plot some individual
+            samples_class = d["samples"][digit]
+            assert len(samples_class) >= n_recon_samples, f"did not find enough samples of class {digit} to plot"
+
+            for c in range(1, n_recon_samples + 1):
+                if c == (n_recon_samples // 2) + 1:
                     axs[digit, c].set_title(f"--- Samples {digit} ---")
-                axs[digit, c].imshow(select_digit_samples[c, :].reshape(28, 28), cmap="Greys")
+                axs[digit, c].imshow(samples_class[c, :].reshape(28, 28), cmap="Greys")
 
-            avg_sample = select_digit_samples.mean(axis=0)
-            l2_d = np.linalg.norm(avg_data_point.reshape(-1) - avg_sample)
-
-            axs[digit, -1].imshow(avg_sample.reshape(28, 28), cmap="Greys")
-            axs[digit, -1].set_title(f"Avg. sampled digit {digit}  p: {p:.2f} l2 d.: {l2_d:.2f}", y=1.03)
+            # Plot average generated sample belonging to this digit class
+            axs[digit, -1].imshow(d["digit_metrics"][digit]["avg_sample"].reshape(28, 28), cmap="Greys")
+            axs[digit, -1].set_title(f"Avg. sampled digit {digit}  p: {p_gen:.2f} l2 d.: {l2:.2f}", y=1.03)
 
         for row in range(10):
             for col in range(cols):
@@ -120,6 +181,8 @@ def build_prior_analysis_grid(vae_model, plot_name, plot_dir, knn_classifier, n_
         plt.suptitle(plot_name, size=14, y=0.93)
         plt.savefig(f"{plot_dir}/prior-grid-{plot_name}.jpg", dpi=300)
         plt.show()
+
+    return d
 
 
 # Estimated generative sample class proportions

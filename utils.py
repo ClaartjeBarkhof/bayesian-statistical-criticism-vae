@@ -1,7 +1,5 @@
 import wandb
-import torch
 import collections
-import numpy as np
 from tabulate import tabulate
 from vae_model.vae import VaeModel
 from arguments import prepare_parser
@@ -9,6 +7,7 @@ import matplotlib.pyplot as plt
 from scipy.stats import norm
 import numpy as np
 import torch
+import torch.nn.functional as F
 
 
 def init_logging(vae_model, args):
@@ -33,6 +32,12 @@ def init_logging(vae_model, args):
             wandb.define_metric(f"{phase}_epoch/{metric} std", step_metric='epoch')
             wandb.define_metric(f"{phase}_epoch/{metric} mean", step_metric='epoch')
 
+    if args.decoder_MADE_gating:
+        # two hidden layers
+        for i in range(2):
+            wandb.define_metric(f"layer_{i}_avg_gate_value", step_metric="epoch")
+            wandb.define_metric(f"layer_{i}_std_gate_value", step_metric="epoch")
+
     # wandb.init(name=args.run_name, project=args.wandb_project, config=args)
     # wandb.watch(vae_model) this gives an error on LISA
 
@@ -47,9 +52,10 @@ def mix_pdf(x, loc, scale, weights):
 
 def log_mog(vae_model, args, epoch):
     if args.p_z_type == "mog":
+        print("Plotting Mixture of Gaussians")
         mix = vae_model.gen_model.mix_components.data  # [n_comp]
         means = vae_model.gen_model.component_means.data  # [n_comp, D]
-        scales = vae_model.gen_model.component_scales.data # [n_comp, D]
+        scales = torch.nn.functional.softplus(vae_model.gen_model.component_pre_scales.data) # [n_comp, D]
 
         mog_n_components, D = means.shape
 
@@ -68,7 +74,7 @@ def log_mog(vae_model, args, epoch):
 
         # PLOT
         fig, ax = plt.subplots(figsize=(20, 10))
-        im = ax.imshow(ys, aspect=5.0, vmin=0.0, vmax=4.5)
+        im = ax.imshow(ys, aspect=5.0) #, vmin=0.0, vmax=4.5
 
         # X TICKS
         n_ticks = 10
@@ -88,7 +94,20 @@ def log_mog(vae_model, args, epoch):
         plt.ylabel("dim")
         plt.colorbar(im)
 
-        wandb.log({f"MoG plot, epoch {epoch}": plt})
+        wandb.log({f"MoG plot, end of epoch {epoch}": plt})
+
+
+def log_gates(vae_model, args, epoch):
+    if args.decoder_MADE_gating:
+        gate_dict = dict(epoch=epoch)
+
+        for i, g in enumerate(vae_model.gen_model.decoder_network.made.gates):
+            avg_gate_values = F.sigmoid(g.data).mean().item()
+            std_gate_values = F.sigmoid(g.data).std().item()
+            gate_dict[f"layer_{i}_avg_gate_value"] = avg_gate_values
+            gate_dict[f"layer_{i}_std_gate_value"] = std_gate_values
+
+        wandb.log(gate_dict)
 
 
 def insert_epoch_stats(epoch_stats, loss_dict):

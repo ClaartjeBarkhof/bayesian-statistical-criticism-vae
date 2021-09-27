@@ -38,26 +38,18 @@ class GenerativeModel(nn.Module):
         # MIXTURE OF GAUSIANS PRIOR
         if self.p_z_type == "mog":
             self.mog_n_components = args.mog_n_components
-
-            # self.mix_components = torch.nn.Parameter(torch.rand(self.mog_n_components))
-            # self.component_means = torch.nn.Parameter(torch.randn(self.mog_n_components, self.D))
-            # self.component_scales = torch.nn.Parameter(torch.abs(torch.randn(self.mog_n_components, self.D)))
-
             self.register_parameter("mix_components", torch.nn.Parameter(torch.rand(self.mog_n_components)))
             self.register_parameter("component_means", torch.nn.Parameter(torch.randn(self.mog_n_components, self.D)))
-            self.register_parameter("component_pre_scales", torch.nn.Parameter(torch.abs(torch.randn(self.mog_n_components, self.D))))
+            self.register_parameter("component_pre_scales", torch.nn.Parameter(torch.abs(
+                torch.randn(self.mog_n_components, self.D))))
 
+        # ISOTROPIC GAUSSIAN PRIOR
         else:
             self.register_buffer("prior_z_means", torch.zeros(self.D, requires_grad=False))
             self.register_buffer("prior_z_scales",  torch.ones(self.D, requires_grad=False))
 
-        #self.p_z = self.init_p_z()
-
         # OUTPUT DISTRIBUTION == DATA DISTRIBUTION
         self.p_x_z_type = args.data_distribution
-
-        for n, p in self.named_parameters():
-            print(n, p.shape)
 
     def sample_generative_model(self, Sx=1, Sz=1):
         # [S, 1, D]
@@ -179,7 +171,7 @@ class ConditionalBernoulliBlockMADE(nn.Module):
         act = nn.ReLU()
 
         self.made = MADE(self.X_dim, hiddens, self.X_dim, natural_ordering=natural_ordering,
-                         context_size=self.D, hidden_activation=act)
+                         context_size=self.D, hidden_activation=act, gating=args.decoder_MADE_gating)
 
     def forward(self, z):
         # Placeholder distribution object

@@ -83,6 +83,8 @@ def prepare_parser(jupyter=False, print_settings=True):
                              "      p(x|z)"
                              "  - conditional_made_decoder:"
                              "      p(x_d|z, x<d)")
+    parser.add_argument("--decoder_MADE_gating", default=True, type=lambda x: bool(distutils.util.strtobool(x)),
+                        help="Whether or not to make use of (learned) gated addition of the context.")
     parser.add_argument("--encoder_network_type", default="basic_conv_encoder", type=str,
                         help="Which architecture / distribution structure to use for decoder, options:"
                              "  - basic_mlp_encoder"
@@ -237,7 +239,7 @@ def make_run_name(args):
     date, time = datetime_stamp.split("--")[0], datetime_stamp.split("--")[1]
     date_time = f"{date}-{time}"
 
-    name = f"q(z|x) {args.encoder_network_type} - {args.q_z_x_type} | p(x|z) {args.decoder_network_type} - {date_time}"
+    name = f"q(z|x) {args.q_z_x_type} | p(x|z) {args.decoder_network_type} | p(z) {args.p_z_type} | D = {args.latent_dim} | {date_time}"
 
     return args.run_name_prefix + name
 

@@ -40,6 +40,7 @@ class MADE(nn.Module):
         natural_ordering=False,
         context_size=0,
         hidden_activation=nn.ReLU(),
+        gating=False,
     ):
         """
         nin: integer; number of inputs
@@ -82,6 +83,10 @@ class MADE(nn.Module):
             self.net.extend([MaskedLinear(h0, h1) for h0, h1 in zip(hs, hs[1:])])
             self.net = nn.ModuleList(self.net)
             self.ctxt_net = [nn.Linear(context_size, h) for h in hidden_sizes]
+            self.gating = gating
+            if gating:
+                print("GATING!")
+                self.gates = [nn.Parameter(data=torch.randn(h), requires_grad=True) for h in hidden_sizes]
             self.ctxt_net = nn.ModuleList(self.ctxt_net)
 
         # seeds for orders/connectivities of the model ensemble
@@ -93,6 +98,10 @@ class MADE(nn.Module):
         self.update_masks()  # builds the initial self.m connectivity
         # note, we could also precompute the masks and cache them, but this
         # could get memory expensive for large number of masks.
+
+        # print("Print parameters of the MADE")
+        # for n, p in self.named_parameters():
+        #     print(n, p.shape)
 
     def update_masks(self):
         if self.m and self.num_masks == 1:
@@ -132,8 +141,11 @@ class MADE(nn.Module):
             return self.net(x)
         else:
             h = x
-            for t, c in zip(self.net, self.ctxt_net):  # hidden layers
-                h = self.hidden_activation(t(h) + c(context))
+            for i, (t, c) in enumerate(zip(self.net, self.ctxt_net)):  # hidden layers
+                if self.gating:
+                    h = self.hidden_activation(t(h) + torch.mul(c(context), F.sigmoid(self.gates[i])))
+                else:
+                    h = self.hidden_activation(t(h) + c(context))
             return self.net[-1](h)  # output layer
 
 

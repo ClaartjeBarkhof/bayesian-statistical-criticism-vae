@@ -146,13 +146,16 @@ class Trainer:
                 if phase == "valid" and mean_reduced_epoch_stats is not None:
                     if mean_reduced_epoch_stats["total_loss"] < best_val_loss:
                         best_val_loss = mean_reduced_epoch_stats["total_loss"]
-                        wandb.run.summary["best_val_total_loss"] = best_val_loss
+                        # Add the current statistics as summary values, to compare runs
+                        for k, v in mean_reduced_epoch_stats.items():
+                            wandb.run.summary[f"BEST_val_{k}"] = v
                         if self.args.checkpointing:
                             utils.make_checkpoint(self.vae_model, self.args, self.optimisers, epoch, step,
                                                   mean_reduced_epoch_stats)
 
             if self.args.logging:
                 utils.log_mog(self.vae_model, self.args, epoch)
+                utils.log_gates(self.vae_model, self.args, epoch)
 
             epoch += 1
 

@@ -260,7 +260,7 @@ def _kl(p, q):
     if p.params is None:
         z = p.rsample()
     else:
-        z = p.sample
+        z = p.samples
 
     log_p_z = p.log_prob(z)
     log_q_z = q.log_prob(z)
