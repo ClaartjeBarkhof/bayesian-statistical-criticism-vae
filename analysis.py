@@ -58,9 +58,9 @@ def build_posterior_analysis_grid(vae_model, plot_name, plot_dir, data_X, data_y
             axs[digit, 1].imshow(log_p_x_per_bit[0, 0, :, :].exp(), cmap="Greys")
             axs[digit, 1].set_title("p(x) per pixel", size=7)
 
-            # [Sx=n_sampled_reconstructions, Sz=1, B=1, C, W, H] -> [Sx=n_sampled_reconstructions, C, W, H]
-            reconstructions = vae_model.reconstruct(data_sample, Sx=n_sampled_reconstructions, Sz=1)
-            reconstructions = reconstructions.squeeze(2).squeeze(1)
+            # [Sx=1, Sz=n_sampled_reconstructions, B=1, C, W, H] -> [Sx=1, C, W, H]
+            reconstructions = vae_model.reconstruct(data_sample, Sx=1, Sz=n_sampled_reconstructions)
+            reconstructions = reconstructions.squeeze(2).squeeze(0)
 
             for i in range(2, n_sampled_reconstructions + 2):
                 axs[digit, i].imshow(reconstructions[i - 2, 0, :, :], cmap="Greys")
@@ -76,7 +76,7 @@ def build_posterior_analysis_grid(vae_model, plot_name, plot_dir, data_X, data_y
 
 
 def build_prior_analysis_grid(vae_model, plot_name, plot_dir, knn_classifier, n_generative_samples, data_X, data_y,
-                              show_n_samples=5, avg_n_data_samples=30):
+                              show_n_samples=5):
     with torch.no_grad():
         # Draw samples x ~ p(z)p(x|z)
 
@@ -95,17 +95,23 @@ def build_prior_analysis_grid(vae_model, plot_name, plot_dir, knn_classifier, n_
         fig, axs = plt.subplots(ncols=cols, nrows=10, figsize=(cols * 1.5, 10 * 1.5))
 
         for digit in range(10):
-            avg_data_point = data_X[data_y == digit][:avg_n_data_samples].mean(axis=0).reshape(28, 28)
+            avg_data_point = data_X[data_y == digit].mean(axis=0).reshape(28, 28)
+            p = len(data_X[data_y == digit]) / len(data_X)
             axs[digit, 0].imshow(avg_data_point, cmap="Greys")
-            axs[digit, 0].set_title(f"Avg. data digit {digit}")
+            axs[digit, 0].set_title(f"Avg. data digit {digit} p: {p:.2f}", y=1.03)
 
             select_digit_samples = samples_flat_np[preds == digit]
+            p = len(select_digit_samples) / len(samples_flat_np)
             for c in range(1, show_n_samples + 1):
+                if c == (show_n_samples // 2) + 1:
+                    axs[digit, c].set_title(f"--- Samples {digit} ---")
                 axs[digit, c].imshow(select_digit_samples[c, :].reshape(28, 28), cmap="Greys")
-                axs[digit, 0].set_title(f"Sampled digit {digit}")
 
-            axs[digit, -1].imshow(select_digit_samples.mean(axis=0).reshape(28, 28), cmap="Greys")
-            axs[digit, -1].set_title(f"Avg. sampled digit {digit}")
+            avg_sample = select_digit_samples.mean(axis=0)
+            l2_d = np.linalg.norm(avg_data_point.reshape(-1) - avg_sample)
+
+            axs[digit, -1].imshow(avg_sample.reshape(28, 28), cmap="Greys")
+            axs[digit, -1].set_title(f"Avg. sampled digit {digit}  p: {p:.2f} l2 d.: {l2_d:.2f}", y=1.03)
 
         for row in range(10):
             for col in range(cols):

@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.distributions as td
 
 from vae_model.sylvester_flows.models.layers import GatedConvTranspose2d
@@ -37,15 +38,17 @@ class GenerativeModel(nn.Module):
         # MIXTURE OF GAUSIANS PRIOR
         if self.p_z_type == "mog":
             self.mog_n_components = args.mog_n_components
-            self.mix_components = torch.nn.Parameter(torch.rand(self.mog_n_components), requires_grad=True)
-            self.component_means = torch.nn.Parameter(torch.randn(self.mog_n_components, self.D), requires_grad=True)
-            self.component_scales = torch.nn.Parameter(torch.abs(torch.randn(self.mog_n_components, self.D)),
-                                                       requires_grad=True)
+            self.mix_components = torch.nn.Parameter(torch.rand(self.mog_n_components))
+            self.component_means = torch.nn.Parameter(torch.randn(self.mog_n_components, self.D))
+            self.component_scales = torch.nn.Parameter(torch.abs(torch.randn(self.mog_n_components, self.D)))
 
         self.p_z = self.init_p_z()
 
         # OUTPUT DISTRIBUTION == DATA DISTRIBUTION
         self.p_x_z_type = args.data_distribution
+
+        for n, p in self.named_parameters():
+            print(n, p.shape)
 
     def sample_generative_model(self, Sx=1, Sz=1):
         # [S, 1, D]
@@ -135,9 +138,8 @@ class GenerativeModel(nn.Module):
 
         # MIXTURE OF GAUSSIANS
         elif self.p_z_type == "mog":
-
             mix = td.Categorical(self.mix_components)
-            comp = td.Independent(td.Normal(self.component_means, self.component_scales), 1)
+            comp = td.Independent(td.Normal(self.component_means, F.softplus(self.component_scales)), 1)
 
             return td.MixtureSameFamily(mix, comp)
         else:
@@ -317,3 +319,31 @@ class DecoderMLPBlock(nn.Module):
             p_x_z_params = p_x_z_params.permute(0, 1, 2, 4, 5, 3)
 
         return p_x_z_params
+
+#
+# class Prior(nn.Module):
+#     def __init__(self, args, device="cpu"):
+#         super(Prior, self).__init__()
+#
+#         self.p_z_type = args.p_z_type
+#         self.D = args.latent_dim
+#         self.device = device
+#
+#         if self.p_z_type == "mog":
+#             mix = td.Categorical(self.mix_components)
+#             comp = td.Independent(td.Normal(self.component_means, F.softplus(self.component_scales)), 1)
+#
+#         # ISOTROPIC GAUSSIAN
+#         if self.p_z_type == "isotropic_gaussian":
+#             return td.Independent(
+#                 td.Normal(loc=torch.zeros(self.D, device=self.device), scale=torch.ones(self.D, device=self.device)), 1)
+#
+#         # MIXTURE OF GAUSSIANS
+#         elif self.p_z_type == "mog":
+#             print("\n\nHEY\n\n")
+#
+#
+#
+#             return td.MixtureSameFamily(mix, comp)
+#         else:
+#             raise ValueError(f"{self.p_z_type} is not a valid p_z_type, choices: isotropic_gaussian, mog")

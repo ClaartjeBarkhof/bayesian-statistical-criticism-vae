@@ -7,6 +7,7 @@ from objective import Objective
 import utils
 import torch.optim as optim
 from functools import partial
+import wandb
 
 
 class Trainer:
@@ -61,9 +62,9 @@ class Trainer:
 
         x_in = x_in.to(self.device)
 
-        q_z_x, z_post, p_z, p_x_z = self.vae_model.forward(x_in)
+        q_z_x, z_post, p_z, p_x_z = self.vae_model(x_in)
 
-        loss_dict = self.objective.compute_loss(x_in, q_z_x, z_post, p_z, p_x_z)
+        loss_dict = self.objective.compute_loss(x_in, q_z_x, z_post, p_z, p_x_z, self.vae_model)
 
         return loss_dict
 
@@ -132,9 +133,9 @@ class Trainer:
                         break
 
                 if phase == "valid" and epoch % self.args.eval_ll_every_n_epochs == 0:
-                    iw_lls = self.vae_model.estimate_log_likelihood(self.data_loaders["valid"],
-                                                                    n_samples=self.args.iw_n_samples,
-                                                                    short_dev_run=self.args.short_dev_run)
+                    iw_lls = self.vae_model.estimate_log_likelihood_dataset(self.data_loaders["valid"],
+                                                                            n_samples=self.args.iw_n_samples,
+                                                                            short_dev_run=self.args.short_dev_run)
                     epoch_stats["iw_ll"] = iw_lls
 
                 # W&B Log epoch statistics as <phase>_epoch/<metric>
@@ -145,10 +146,13 @@ class Trainer:
                 if phase == "valid" and mean_reduced_epoch_stats is not None:
                     if mean_reduced_epoch_stats["total_loss"] < best_val_loss:
                         best_val_loss = mean_reduced_epoch_stats["total_loss"]
+                        wandb.run.summary["best_val_total_loss"] = best_val_loss
                         if self.args.checkpointing:
-                            utils.make_checkpoint(self.vae_model, self.args, self.optimisers, epoch, step, mean_reduced_epoch_stats)
+                            utils.make_checkpoint(self.vae_model, self.args, self.optimisers, epoch, step,
+                                                  mean_reduced_epoch_stats)
 
-            # TODO: utils.log_mog(self.vae_model, self.args)
+            if self.args.logging:
+                utils.log_mog(self.vae_model, self.args, epoch)
 
             epoch += 1
 

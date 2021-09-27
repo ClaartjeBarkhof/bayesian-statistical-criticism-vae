@@ -5,6 +5,10 @@ import numpy as np
 from tabulate import tabulate
 from vae_model.vae import VaeModel
 from arguments import prepare_parser
+import matplotlib.pyplot as plt
+from scipy.stats import norm
+import numpy as np
+import torch
 
 
 def init_logging(vae_model, args):
@@ -32,11 +36,59 @@ def init_logging(vae_model, args):
     # wandb.init(name=args.run_name, project=args.wandb_project, config=args)
     # wandb.watch(vae_model) this gives an error on LISA
 
-# def log_mog(vae_model, args):
-#     if args.p_z_type == "mog":
-#         mix = vae_model.gen_model.mix_components.data  # [n_comp]
-#         mean = vae_model.gen_model.component_means.data  # [n_comp, D]
-#         scale = vae_model.gen_model.component_scales.data # [n_comp, D]
+
+# GET IMSHOW DATA
+def mix_pdf(x, loc, scale, weights):
+    d = np.zeros_like(x)
+    for mu, sigma, pi in zip(loc, scale, weights):
+        d += pi * norm.pdf(x, loc=mu, scale=sigma)
+    return d
+
+
+def log_mog(vae_model, args, epoch):
+    if args.p_z_type == "mog":
+        mix = vae_model.gen_model.mix_components.data  # [n_comp]
+        means = vae_model.gen_model.component_means.data  # [n_comp, D]
+        scales = vae_model.gen_model.component_scales.data # [n_comp, D]
+
+        mog_n_components, D = means.shape
+
+        # LINSPACE
+        lin_space_ticks = 100
+        min_lin, max_lin = -5, 5
+        x = np.linspace(min_lin, max_lin, lin_space_ticks)
+
+        ys = []
+        for d in range(D):
+            means_d = means[:, d]
+            scales_d = scales[:, d]
+            y = mix_pdf(x.tolist(), means_d.tolist(), scales_d.tolist(), mix.tolist())
+            ys.append(y)
+        ys = np.stack(ys, axis=0)
+
+        # PLOT
+        fig, ax = plt.subplots(figsize=(20, 10))
+        im = ax.imshow(ys, aspect=5.0, vmin=0.0, vmax=4.5)
+
+        # X TICKS
+        n_ticks = 10
+        step_size = lin_space_ticks // n_ticks
+        locs = np.arange(0, lin_space_ticks, step_size)
+        labels = [f"{a:.2f}" for a in x[::step_size]]
+        plt.xticks(locs, labels)
+
+        # Y TICKS
+        ax.set_yticks(np.arange(0, D, 1))
+        ax.set_yticklabels(np.arange(1, D + 1, 1))
+        ax.set_yticks(np.arange(-.5, D, 1), minor=True)
+        ax.grid(which='minor', color='w', linestyle='-', linewidth=1)
+
+        plt.title("MoG prior")
+        plt.xlabel("z")
+        plt.ylabel("dim")
+        plt.colorbar(im)
+
+        wandb.log({f"MoG plot, epoch {epoch}": plt})
 
 
 def insert_epoch_stats(epoch_stats, loss_dict):

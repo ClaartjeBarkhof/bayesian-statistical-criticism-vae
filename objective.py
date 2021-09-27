@@ -35,7 +35,7 @@ class Objective(nn.Module):
         return Constraint(self.args.mdr_value, "ge", alpha=0.5).to(
             self.device) if self.args.objective == "MDR-VAE" else None
 
-    def compute_loss(self, x_in, q_z_x, z_post, p_z, p_x_z):
+    def compute_loss(self, x_in, q_z_x, z_post, p_z, p_x_z, vae_model):
         """
         This function computes statistics and assembles the loss for which we optimise
         based on which objective is used.
@@ -69,7 +69,7 @@ class Objective(nn.Module):
 
         # Expected KL from prior to posterior (scalar)
         kl_prior_post = self.kl_prior_post(p_z=p_z, q_z_x=q_z_x, batch_size=B,
-                                           z_post=z_post, analytical=True)
+                                           z_post=z_post, analytical=True, vae_model=vae_model)
 
         # Distortion [S, B]
         log_p_x_z = p_x_z.log_prob(labels)
@@ -130,7 +130,7 @@ class Objective(nn.Module):
         return loss_dict
 
     @staticmethod
-    def kl_prior_post(p_z, q_z_x, batch_size, z_post=None, analytical=False):
+    def kl_prior_post(p_z, q_z_x, batch_size, z_post=None, analytical=False, vae_model=None):
         """Computes the KL from prior to posterior, either analytically or empirically."""
 
         # A bit of a hack to avoid this kl that raises a NotImplementedError (TODO: make this possible)
@@ -143,7 +143,16 @@ class Objective(nn.Module):
         else:
             # [S, B] -> [B]
             log_q_z_x = q_z_x.log_prob(z_post).mean(dim=0)
-            log_p_z = p_z.log_prob(z_post).mean(dim=0)
+
+
+            if isinstance(p_z, td.MixtureSameFamily):
+                mix = td.Categorical(vae_model.gen_model.mix_components)
+                comp = td.Independent(td.Normal(vae_model.gen_model.component_means, torch.nn.functional.softplus(vae_model.gen_model.component_scales)), 1)
+                p_z_ = td.MixtureSameFamily(mix, comp)
+                log_p_z = p_z_.log_prob(z_post).mean(dim=0)
+                print("log_p_z.shape", log_p_z.shape)
+            else:
+                log_p_z = p_z.log_prob(z_post).mean(dim=0)
 
             kl = (log_q_z_x - log_p_z)
 

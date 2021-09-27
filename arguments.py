@@ -3,6 +3,7 @@ import configargparse
 import sys
 import os
 import datetime
+import yaml
 
 
 def prepare_parser(jupyter=False, print_settings=True):
@@ -59,12 +60,12 @@ def prepare_parser(jupyter=False, print_settings=True):
     parser.add_argument("--gen_opt", type=str, default="adam")
     parser.add_argument("--gen_lr", type=float, default=1e-4)
     parser.add_argument("--gen_l2_weight", type=float, default=1e-4)
-    parser.add_argument("--gen_momentum", type=int, default=0.0)
+    parser.add_argument("--gen_momentum", type=float, default=0.0)
 
     parser.add_argument("--inf_opt", type=str, default="adam")
     parser.add_argument("--inf_lr", type=float, default=1e-4)
     parser.add_argument("--inf_l2_weight", type=float, default=1e-4)
-    parser.add_argument("--inf_momentum", type=int, default=0.0)
+    parser.add_argument("--inf_momentum", type=float, default=0.0)
 
     parser.add_argument("--max_gradient_norm", type=float, default=1.0)
     # TODO: parser.add_argument("--lr_scheduler", default=False, type=lambda x: bool(distutils.util.strtobool(x)),
@@ -290,3 +291,6 @@ def check_settings(args):
 
 if __name__ == "__main__":
     config = prepare_parser(jupyter=False, print_settings=True)
+
+    with open("test_config.yaml", 'w') as file:
+        documents = yaml.dump(vars(config), file)
