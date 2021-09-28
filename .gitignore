@@ -139,3 +139,4 @@ check_inference_model.ipynb
 /checkpoints/
 /wandb/
 /notebooks/knnclassifier.pickle
+/jobs/

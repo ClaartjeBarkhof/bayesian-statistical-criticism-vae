@@ -145,10 +145,6 @@ class Objective(nn.Module):
             kl = kl_divergence(q_z_x, p_z)
 
         else:
-            print("Z_post.shape", z_post.shape)
-            print("p_z", p_z)
-            print("q_z_x", q_z_x)
-
             # [S, B] -> [B]
             log_q_z_x = q_z_x.log_prob(z_post).mean(dim=0)
 

@@ -32,9 +32,10 @@ def init_logging(vae_model, args):
             wandb.define_metric(f"{phase}_epoch/{metric} std", step_metric='epoch')
             wandb.define_metric(f"{phase}_epoch/{metric} mean", step_metric='epoch')
 
-    if args.decoder_MADE_gating:
-        # two hidden layers
-        for i in range(2):
+    if args.decoder_MADE_gating and args.decoder_network_type == "conditional_made_decoder":
+        # h hidden layers
+        h = len(vae_model.gen_model.decoder_network.made.hidden_sizes)
+        for i in range(h):
             wandb.define_metric(f"layer_{i}_avg_gate_value", step_metric="epoch")
             wandb.define_metric(f"layer_{i}_std_gate_value", step_metric="epoch")
 
@@ -53,7 +54,7 @@ def mix_pdf(x, loc, scale, weights):
 def log_mog(vae_model, args, epoch):
     if args.p_z_type == "mog":
         print("Plotting Mixture of Gaussians")
-        mix = vae_model.gen_model.mix_components.data  # [n_comp]
+        mix = torch.nn.functional.softmax(vae_model.gen_model.mix_components.data)  # [n_comp]
         means = vae_model.gen_model.component_means.data  # [n_comp, D]
         scales = torch.nn.functional.softplus(vae_model.gen_model.component_pre_scales.data) # [n_comp, D]
 
@@ -98,12 +99,15 @@ def log_mog(vae_model, args, epoch):
 
 
 def log_gates(vae_model, args, epoch):
-    if args.decoder_MADE_gating:
+    if args.decoder_MADE_gating and args.decoder_network_type == "conditional_made_decoder":
         gate_dict = dict(epoch=epoch)
 
-        for i, g in enumerate(vae_model.gen_model.decoder_network.made.gates):
-            avg_gate_values = F.sigmoid(g.data).mean().item()
-            std_gate_values = F.sigmoid(g.data).std().item()
+        made = vae_model.gen_model.decoder_network.made
+
+        for i in range(len(made.hidden_sizes)):
+            gate_values = made.__getattr__(f"gate_h_{i}").data
+            avg_gate_values = F.sigmoid(gate_values).mean().item()
+            std_gate_values = F.sigmoid(gate_values).std().item()
             gate_dict[f"layer_{i}_avg_gate_value"] = avg_gate_values
             gate_dict[f"layer_{i}_std_gate_value"] = std_gate_values
 
@@ -207,7 +211,7 @@ def determine_device(args):
 
 def make_checkpoint(model, args, optimisers, epoch, step, mean_reduced_epoch_stats):
     c_path = f"{args.checkpoint_dir}{args.run_name}.pt"
-    # , saving checkpoint at:\n{c_path}
+
     print()
     print("*"*40)
     best_val_loss = mean_reduced_epoch_stats["total_loss"]
