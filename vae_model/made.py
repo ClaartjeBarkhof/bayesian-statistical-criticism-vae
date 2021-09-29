@@ -99,9 +99,9 @@ class MADE(nn.Module):
         # note, we could also precompute the masks and cache them, but this
         # could get memory expensive for large number of masks.
 
-        print("Print parameters of the MADE")
-        for n, p in self.named_parameters():
-            print(n, p.shape)
+        # print("Print parameters of the MADE")
+        # for n, p in self.named_parameters():
+        #     print(n, p.shape)
 
     def update_masks(self):
         if self.m and self.num_masks == 1:

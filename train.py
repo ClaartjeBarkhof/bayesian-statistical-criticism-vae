@@ -139,16 +139,19 @@ class Trainer:
                     epoch_stats["iw_ll"] = iw_lls
 
                 # W&B Log epoch statistics as <phase>_epoch/<metric>
-                if self.args.logging:
-                    mean_reduced_epoch_stats = utils.reduce_and_log_epoch_stats(epoch_stats, phase, epoch, step,
-                                                                                print_stats=self.args.print_stats)
+                mean_reduced_epoch_stats = utils.reduce_and_log_epoch_stats(epoch_stats, phase, epoch, step,
+                                                                            log_stats=self.args.logging,
+                                                                            print_stats=self.args.print_stats)
 
                 if phase == "valid" and mean_reduced_epoch_stats is not None:
                     if mean_reduced_epoch_stats["total_loss"] < best_val_loss:
                         best_val_loss = mean_reduced_epoch_stats["total_loss"]
-                        # Add the current statistics as summary values, to compare runs
-                        for k, v in mean_reduced_epoch_stats.items():
-                            wandb.run.summary[f"BEST_val_{k}"] = v
+                        if self.args.logging:
+                            # Add the current statistics as summary values, to compare runs
+                            for k, v in mean_reduced_epoch_stats.items():
+                                wandb.run.summary[f"BEST_val_{k}"] = v
+                            wandb.run.summary[f"BEST_val_epoch"] = epoch
+
                         if self.args.checkpointing:
                             utils.make_checkpoint(self.vae_model, self.args, self.optimisers, epoch, step,
                                                   mean_reduced_epoch_stats)

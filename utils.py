@@ -51,10 +51,11 @@ def mix_pdf(x, loc, scale, weights):
     return d
 
 
-def log_mog(vae_model, args, epoch):
+def log_mog(vae_model, args, epoch, log=True, plot=False, title=None, save=None):
     if args.p_z_type == "mog":
         print("Plotting Mixture of Gaussians")
-        mix = torch.nn.functional.softmax(vae_model.gen_model.mix_components.data)  # [n_comp]
+
+        mix = torch.nn.functional.softmax(vae_model.gen_model.mix_components.data, dim=-1)  # [n_comp]
         means = vae_model.gen_model.component_means.data  # [n_comp, D]
         scales = torch.nn.functional.softplus(vae_model.gen_model.component_pre_scales.data) # [n_comp, D]
 
@@ -90,12 +91,22 @@ def log_mog(vae_model, args, epoch):
         ax.set_yticks(np.arange(-.5, D, 1), minor=True)
         ax.grid(which='minor', color='w', linestyle='-', linewidth=1)
 
-        plt.title("MoG prior")
+        if title is not None:
+            plt.title(title)
+        else:
+            plt.title(f"MoG plot, end of epoch {epoch}")
         plt.xlabel("z")
         plt.ylabel("dim")
         plt.colorbar(im)
 
-        wandb.log({f"MoG plot, end of epoch {epoch}": plt})
+        if save is not None:
+            plt.savefig(save, dpi=300, bbox_inches="tight")
+
+        if log:
+            wandb.log({"MoG plot (end of epoch)": plt, "epoch": epoch})
+
+        if plot:
+            plt.show()
 
 
 def log_gates(vae_model, args, epoch):
@@ -126,7 +137,7 @@ def insert_epoch_stats(epoch_stats, loss_dict):
     return epoch_stats
 
 
-def reduce_and_log_epoch_stats(epoch_stats, phase, epoch, step, print_stats=True):
+def reduce_and_log_epoch_stats(epoch_stats, phase, epoch, step, print_stats=True, log_stats=False):
     print_list = []
     mean_reduced = dict()
     wandb_log_dict = {}
@@ -140,7 +151,9 @@ def reduce_and_log_epoch_stats(epoch_stats, phase, epoch, step, print_stats=True
 
     wandb_log_dict["epoch"] = epoch
     wandb_log_dict["global step"] = step
-    wandb.log(wandb_log_dict)
+
+    if log_stats:
+        wandb.log(wandb_log_dict)
 
     if print_stats:
         print()
@@ -234,8 +247,8 @@ def make_checkpoint(model, args, optimisers, epoch, step, mean_reduced_epoch_sta
     torch.save(state, c_path)
 
 
-def load_checkpoint_model_for_eval(checkpoint_path):
-    checkpoint = torch.load(checkpoint_path)
+def load_checkpoint_model_for_eval(checkpoint_path, map_location="cuda:0"):
+    checkpoint = torch.load(checkpoint_path, map_location=map_location)
 
     if "args" in checkpoint:
         args = checkpoint["args"]

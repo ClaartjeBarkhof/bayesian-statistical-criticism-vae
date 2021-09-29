@@ -207,7 +207,7 @@ def plot_gen_sample_class_proportions(vae_model, knn_classifier, n_gen_samples, 
         plt.show()
 
 
-def plot_latents(encodings, clean_name, plot_N_sep_posteriors=10, plot_N_encodings=200):
+def plot_latents(encodings, clean_name, plot_N_sep_posteriors=10, plot_N_encodings=200, save=None):
     x = np.linspace(-4, 4, 500)
     y = scipy.stats.norm.pdf(x, 0, 1)
 
@@ -253,4 +253,8 @@ def plot_latents(encodings, clean_name, plot_N_sep_posteriors=10, plot_N_encodin
     axs[-1].legend(loc=(0.0, 1.1), prop={'family': 'serif', 'weight': 300, 'size': 14})
 
     fig.suptitle(clean_name, size=16, y=1.04)
+
+    if save is not None:
+        plt.savefig(save, dpi=300, bbox_inches="tight")
+
     plt.show()

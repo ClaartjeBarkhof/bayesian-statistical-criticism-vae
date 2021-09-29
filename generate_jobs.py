@@ -8,9 +8,10 @@ batch = slurmjobs.SlurmBatch(
 # generate jobs across parameter grid
 run_script, job_paths = batch.generate([
     ('p_z_type', ['isotropic_gaussian', 'mog']),
-    ('q_z_x_type', ["independent_gaussian", "conditional_gaussian_made"]),
-    ('decoder_network_type', ['basic_mlp_decoder', 'basic_deconv_decoder', 'conditional_made_decoder'])],
+    ('q_z_x_type', ["independent_gaussian", "conditional_gaussian_made"])],
+    # ('decoder_network_type', ['basic_mlp_decoder', 'basic_deconv_decoder', 'conditional_made_decoder'])],
     objective="VAE",
+    decoder_network_type="cond_pixel_cnn_pp",
     encoder_network_type="basic_conv_encoder",
     decoder_MADE_gating=True,
     mdr_value=8.0,
@@ -33,7 +34,7 @@ run_script, job_paths = batch.generate([
     print_stats=True,
     print_every_n_steps=50,
     iw_n_samples=50,
-    run_name_prefix="(27 sept) ",
+    run_name_prefix="(29 sept) ",
     logging=True,
     log_every_n_steps=5,
     short_dev_run=False,

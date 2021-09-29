@@ -82,7 +82,7 @@ class Objective(nn.Module):
         # Maximum mean discrepancy
         # z_post at this point is [S, B, D]
         # mmd = scalar tensor
-        mmd = self.maximum_mean_discrepancy(z_post)
+        mmd = self.maximum_mean_discrepancy(z_post, p_z)
 
         elbo = - (distortion + kl_prior_post)
 
@@ -196,10 +196,13 @@ class Objective(nn.Module):
         return kl_fb.mean()
 
     @staticmethod
-    def maximum_mean_discrepancy(z_post):
+    def maximum_mean_discrepancy(z_post, p_z):
         # [S, B, D] -> [B, D]
         z_post = z_post.reshape(-1, z_post.shape[-1])
-        prior_sample = torch.randn_like(z_post)  # .to(z_post.device)
+
+        prior_sample = p_z.sample(sample_shape=(z_post.shape[0],))
+        # prior_sample = torch.randn_like(z_post)  # .to(z_post.device)
+
         alphas = [0.1 * i for i in range(5)]  # TODO: no clue for these...
 
         n_1, n_2 = len(z_post), len(prior_sample)

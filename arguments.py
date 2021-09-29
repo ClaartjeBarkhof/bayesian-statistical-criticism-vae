@@ -81,7 +81,8 @@ def prepare_parser(jupyter=False, print_settings=True):
                              "  - basic_mlp_decoder"
                              "  - basic_deconv_decoder:"
                              "      p(x|z)"
-                             "  - conditional_made_decoder:"
+                             "  - conditional_made_decoder,"
+                             "  - cond_pixel_cnn_pp:"
                              "      p(x_d|z, x<d)")
     parser.add_argument("--decoder_MADE_gating", default=True, type=lambda x: bool(distutils.util.strtobool(x)),
                         help="Whether or not to make use of (learned) gated addition of the context.")
@@ -266,7 +267,7 @@ def check_settings(args):
         raise NotImplementedError
 
     # Decoder network types
-    decoder_network_type_options = ["basic_mlp_decoder", "basic_deconv_decoder", "conditional_made_decoder"]
+    decoder_network_type_options = ["basic_mlp_decoder", "basic_deconv_decoder", "conditional_made_decoder", "cond_pixel_cnn_pp"]
     check_valid_option(args.decoder_network_type, decoder_network_type_options, "decoder_network_type")
 
     # Encoder network types
