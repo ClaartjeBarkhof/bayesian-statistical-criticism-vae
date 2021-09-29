@@ -1,13 +1,9 @@
 batch_size: 8
 beta_beta: 1.0
-checkpoint_dir: /Users/claartje/Dropbox/Werk/2021 ILLC/marginal-kl-vae/run_files/checkpoints/
-checkpointing: false
-code_dir: /Users/claartje/Dropbox/Werk/2021 ILLC/marginal-kl-vae
-config_file: null
-data_dir: /Users/claartje/Dropbox/Werk/2021 ILLC/marginal-kl-vae/data
+checkpointing: True
 data_distribution: bernoulli
 ddp: false
-decoder_network_type: cond_pixel_cnn_pp
+decoder_network_type: basic_deconv_decoder
 encoder_network_type: basic_conv_encoder
 eval_ll_every_n_epochs: 1
 free_bits: 5.0
@@ -15,7 +11,7 @@ gen_l2_weight: 0.0001
 gen_lr: 0.0001
 gen_momentum: 0.0
 gen_opt: adam
-gpus: 0
+gpus: 1
 image_dataset_name: bmnist
 image_or_language: image
 image_w_h: 28
@@ -26,25 +22,24 @@ inf_opt: adam
 info_alpha: 0.0
 info_lambda: 1000.0
 iw_n_samples: 5
-language_dataset_name: ptb_text_only
 latent_dim: 32
 log_every_n_steps: 1
-logging: false
+logging: True
 max_epochs: 120
 max_gradient_norm: 1.0
 max_seq_len: 64
 max_steps: 1000000
 mdr_constraint_optim_lr: 0.001
-mdr_value: 16.0
-mog_n_components: 10
+mdr_value: 5.0
+mog_n_components: 5
 n_channels: 1
-num_workers: 0
-objective: VAE
+num_workers: 4
+objective: MDR-VAE
 p_x_z_type: bernoulli
 p_z_type: mog
-print_every_n_steps: 1
+print_every_n_steps: 50
 print_stats: True
 q_z_x_type: independent_gaussian
-run_name_prefix: ''
-short_dev_run: True
+run_name_prefix: 'TEST-MDR-MOG'
+short_dev_run: False
 wandb_project: fall-2021-VAE
