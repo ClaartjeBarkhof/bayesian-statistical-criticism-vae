@@ -13,6 +13,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.distributions as td
 
+
 # ------------------------------------------------------------------------------
 
 
@@ -32,15 +33,16 @@ class MaskedLinear(nn.Linear):
 
 class MADE(nn.Module):
     def __init__(
-        self,
-        nin,
-        hidden_sizes,
-        nout,
-        num_masks=1,
-        natural_ordering=False,
-        context_size=0,
-        hidden_activation=nn.ReLU(),
-        gating=False,
+            self,
+            nin,
+            hidden_sizes,
+            nout,
+            num_masks=1,
+            natural_ordering=False,
+            context_size=0,
+            hidden_activation=nn.ReLU(),
+            gating=False,
+            gating_mechanism=0,
     ):
         """
         nin: integer; number of inputs
@@ -84,9 +86,19 @@ class MADE(nn.Module):
             self.net = nn.ModuleList(self.net)
             self.ctxt_net = [nn.Linear(context_size, h) for h in hidden_sizes]
             self.gating = gating
+            self.gating_mechanism = gating_mechanism
             if gating:
-                for h_idx, h_size in enumerate(hidden_sizes):
-                    self.register_parameter(f"gate_h_{h_idx}", torch.nn.Parameter(torch.randn(h_size)))
+                # First gating option is a learned gated context addition
+                if self.gating_mechanism == 0:
+                    for h_idx, h_size in enumerate(hidden_sizes):
+                        self.register_parameter(f"gate_h_{h_idx}", torch.nn.Parameter(torch.randn(h_size)))
+                # Gated Pixel CNN like gating
+                # act( lin_1(z) + lin_2(x) ) * sigm( lin_3(x, z) )
+                elif self.gating_mechanism == 1:
+                    # same as self.net (masked linear layers)
+                    self.gate_x_net = nn.ModuleList([MaskedLinear(h0, h1) for h0, h1 in zip(hs, hs[1:])])
+                    self.gate_z_net = nn.ModuleList([nn.Linear(in_features=context_size, out_features=h) for h in hidden_sizes])
+
             self.ctxt_net = nn.ModuleList(self.ctxt_net)
 
         # seeds for orders/connectivities of the model ensemble
@@ -136,6 +148,11 @@ class MADE(nn.Module):
         for l, m in zip(layers, masks):
             l.set_mask(m)
 
+        if self.gating_mechanism == 1:
+            layers = [l for l in self.gate_x_net.modules() if isinstance(l, MaskedLinear)]
+            for l, m in zip(layers, masks):
+                l.set_mask(m)
+
     def forward(self, x, context=None):
         if self.ctxt_net is None:
             return self.net(x)
@@ -143,8 +160,28 @@ class MADE(nn.Module):
             h = x
             for i, (t, c) in enumerate(zip(self.net, self.ctxt_net)):  # hidden layers
                 if self.gating:
-                    gate_i = self.__getattr__(f"gate_h_{i}")
-                    h = self.hidden_activation(t(h) + torch.mul(c(context), F.sigmoid(gate_i)))
+                    if self.gating_mechanism == 0:
+                        gate_i = self.__getattr__(f"gate_h_{i}")
+                        h = self.hidden_activation(t(h) + torch.mul(c(context), F.sigmoid(gate_i)))
+                    else:
+                        # act ( lin(z) + m_lin(x) ) * sigm ( lin(z) + m_lin(x) )
+                        # act ( z_1 + x_1 ) + sigm ( z_2 + x_2 )
+
+                        # print(f"made layer {i}")
+                        # print("context", context.shape)
+                        # print("h", h.shape)
+
+                        z_1 = c(context)
+                        z_2 = self.gate_z_net[i](context)
+                        x_1 = t(h)
+                        x_2 = self.gate_x_net[i](h)
+
+                        # print("z_1", z_1.shape)
+                        # print("z_2", z_2.shape)
+                        # print("x_1.shape", x_1.shape)
+                        # print("x_2.shape", x_2.shape)
+
+                        h = self.hidden_activation(x_1 + z_1) * F.sigmoid(x_2 + z_2)
                 else:
                     h = self.hidden_activation(t(h) + c(context))
             return self.net[-1](h)  # output layer

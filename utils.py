@@ -75,7 +75,7 @@ def log_mog(vae_model, args, epoch, log=True, plot=False, title=None, save=None)
         ys = np.stack(ys, axis=0)
 
         # PLOT
-        fig, ax = plt.subplots(figsize=(20, 10))
+        fig, ax = plt.subplots(figsize=(10, 10))
         im = ax.imshow(ys, aspect=5.0) #, vmin=0.0, vmax=4.5
 
         # X TICKS
@@ -110,7 +110,8 @@ def log_mog(vae_model, args, epoch, log=True, plot=False, title=None, save=None)
 
 
 def log_gates(vae_model, args, epoch):
-    if args.decoder_MADE_gating and args.decoder_network_type == "conditional_made_decoder":
+    if args.decoder_MADE_gating and args.decoder_network_type == "conditional_made_decoder" \
+            and args.decoder_MADE_gating_mechanism == 0:
         gate_dict = dict(epoch=epoch)
 
         made = vae_model.gen_model.decoder_network.made

@@ -86,10 +86,18 @@ def prepare_parser(jupyter=False, print_settings=True):
                              "      p(x_d|z, x<d)")
     parser.add_argument("--decoder_MADE_gating", default=True, type=lambda x: bool(distutils.util.strtobool(x)),
                         help="Whether or not to make use of (learned) gated addition of the context.")
+    parser.add_argument("--decoder_MADE_gating_mechanism", default=0, type=int,
+                        help="What gating mechanism to use for adding the latent as context:"
+                             "  - 0: learned gate: h = act(t(h) + c(context) * sigmoid(gate_i))"
+                             "  - 1: pixel cnn like gate: h = act( m_lin(h) + lin(z)) * sigmoid(m_lin(h) + lin(z))")
+    parser.add_argument("--decoder_MADE_hidden_sizes", default="200-220", type=str,
+                        help="Sizes of the hidden layers of the decoder MADE, format as H-H-H")
     parser.add_argument("--encoder_network_type", default="basic_conv_encoder", type=str,
                         help="Which architecture / distribution structure to use for decoder, options:"
                              "  - basic_mlp_encoder"
                              "  - basic_conv_encoder")
+    parser.add_argument("--encoder_MADE_hidden_sizes", default="200-220", type=str,
+                        help="Sizes of the hidden layers of the decoder MADE, format as H-H-H")
 
     # ----------------------------------------------------------------------------------------------------------------
     # DISTRIBUTION TYPES
@@ -240,7 +248,9 @@ def make_run_name(args):
     date, time = datetime_stamp.split("--")[0], datetime_stamp.split("--")[1]
     date_time = f"{date}-{time}"
 
-    name = f"q(z|x) {args.q_z_x_type} | p(x|z) {args.decoder_network_type} | p(z) {args.p_z_type} | D = {args.latent_dim} | {date_time}"
+    #name = f"q(z|x) {args.q_z_x_type} | p(x|z) {args.decoder_network_type} | p(z) {args.p_z_type} | D = {args.latent_dim} | {date_time}"
+
+    name = f"dec_made_hs {args.decoder_MADE_hidden_sizes} p(z) {args.p_z_type} D {args.latent_dim} | {date_time}"
 
     return args.run_name_prefix + name
 
@@ -270,6 +280,9 @@ def check_settings(args):
     decoder_network_type_options = ["basic_mlp_decoder", "basic_deconv_decoder", "conditional_made_decoder", "cond_pixel_cnn_pp"]
     check_valid_option(args.decoder_network_type, decoder_network_type_options, "decoder_network_type")
 
+    MADE_gating_mech_options = [0, 1]
+    check_valid_option(args.decoder_MADE_gating_mechanism, MADE_gating_mech_options, "decoder_MADE_gating_mechanism")
+
     # Encoder network types
     encoder_network_type_options = ["basic_mlp_encoder", "basic_conv_encoder"]
     check_valid_option(args.encoder_network_type, encoder_network_type_options, "encoder_network_type")
@@ -295,5 +308,7 @@ def check_settings(args):
 if __name__ == "__main__":
     config = prepare_parser(jupyter=False, print_settings=True)
 
-    with open("test_config.yaml", 'w') as file:
+    default_config_file = "test_config.yaml"
+    print("Dumping default config in:", default_config_file)
+    with open(default_config_file, 'w') as file:
         documents = yaml.dump(vars(config), file)

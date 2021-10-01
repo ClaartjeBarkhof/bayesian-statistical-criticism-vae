@@ -75,11 +75,17 @@ class PixelCNN(nn.Module):
         down_output_dims = list(reversed(up_output_dims))
 
         down_nr_resnet = [nr_resnet] + [nr_resnet + 1] * 2
+
+        self.down_layers_cond = False
+        self.up_layers_cond = True if conditional else False
+
         self.down_layers = nn.ModuleList([PixelCNNLayer_down(down_nr_resnet[i], nr_filters,
-                                                             self.resnet_nonlinearity, dim_i=down_output_dims[i], conditional=conditional, h_dim=h_dim) for i in range(3)])
+                                                             self.resnet_nonlinearity, dim_i=down_output_dims[i],
+                                                             conditional=self.down_layers_cond, h_dim=h_dim) for i in range(3)])
 
         self.up_layers = nn.ModuleList([PixelCNNLayer_up(nr_resnet, nr_filters,
-                                                         self.resnet_nonlinearity, dim_i=up_output_dims[i], conditional=conditional, h_dim=h_dim) for i in range(3)])
+                                                         self.resnet_nonlinearity, dim_i=up_output_dims[i],
+                                                         conditional=self.up_layers_cond, h_dim=h_dim) for i in range(3)])
 
         self.downsize_u_stream = nn.ModuleList([down_shifted_conv2d(nr_filters, nr_filters,
                                                                     stride=(2, 2)) for _ in range(2)])
@@ -132,7 +138,7 @@ class PixelCNN(nn.Module):
         ul_list = [self.ul_init[0](x) + self.ul_init[1](x)]
         for i in range(3):
             # resnet block
-            u_out, ul_out = self.up_layers[i](u_list[-1], ul_list[-1], h=h)
+            u_out, ul_out = self.up_layers[i](u_list[-1], ul_list[-1], h=h if self.up_layers_cond else False)
             u_list += u_out
             ul_list += ul_out
 
@@ -147,7 +153,7 @@ class PixelCNN(nn.Module):
 
         for i in range(3):
             # resnet block
-            u, ul = self.down_layers[i](u, ul, u_list, ul_list, h=h)
+            u, ul = self.down_layers[i](u, ul, u_list, ul_list, h=h if self.down_layers_cond else False)
 
             # upscale (only twice)
             if i != 2:

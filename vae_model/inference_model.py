@@ -112,7 +112,8 @@ class ConditionalGaussianBlockMADE(nn.Module):
 
         self.D = args.latent_dim
 
-        hiddens = [200, 220]
+        hiddens = [int(h) for h in args.encoder_MADE_hidden_sizes.split("-")]
+        print("Hidden sizes of the encoder made: ", hiddens)
 
         natural_ordering = True
         act = nn.ReLU()
