@@ -8,6 +8,7 @@ import utils
 import torch.optim as optim
 from functools import partial
 import wandb
+import numpy as np
 
 
 class Trainer:
@@ -167,6 +168,42 @@ class Trainer:
 
             if epoch == self.args.max_epochs:
                 break
+
+    def test(self, batch_size=None, device="cuda:0"):
+        test_loader = self.dataset.test_loader(batch_size=batch_size)
+        results = dict()
+
+        for batch_idx, (X, y) in enumerate(test_loader):
+            loss_dict = self.validation_step(X.to(device))
+
+            for k, v in loss_dict.items():
+                if k not in results:
+                    results[k] = []
+
+                if torch.is_tensor(v):
+                    val = v.item()
+                    results[k].append(val)
+                elif type(v) == float:
+                    val = v
+                    results[k].append(val)
+                else:
+                    continue
+
+        for k, v in results.items():
+            print(k, np.mean(v))
+
+        return results
+
+
+def test_from_checkpoint(checkpoint_path, batch_size=100, map_location="cuda:0"):
+    vae_model, args = utils.load_checkpoint_model_for_eval(checkpoint_path=checkpoint_path,
+                                                           map_location=map_location,
+                                                           return_args=True)
+    vae_model.to(map_location)
+    dataset = ImageDataset(args=args)
+    trainer = Trainer(args=args, dataset=dataset, vae_model=vae_model, device=map_location)
+    test_results = trainer.test(batch_size=batch_size)
+    return test_results
 
 
 def main(config=None):

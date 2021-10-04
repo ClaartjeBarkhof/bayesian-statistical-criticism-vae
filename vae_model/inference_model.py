@@ -1,3 +1,4 @@
+import torch
 import torch.nn as nn
 import torch.distributions as td
 
@@ -57,6 +58,8 @@ class InferenceModel(nn.Module):
             return IndependentGaussianBlock(args=self.args)
         elif self.q_z_x_type == "conditional_gaussian_made":
             return ConditionalGaussianBlockMADE(args=self.args)
+        elif self.q_z_x_type == "standard_normal":
+            return StandardNormal(args=self.args)
         elif self.q_z_x_type == "iaf":
             # TODO: return IAF(args=self.args)
             raise NotImplementedError
@@ -106,13 +109,34 @@ class IndependentGaussianBlock(nn.Module):
         return q_z_x
 
 
+class StandardNormal(nn.Module):
+    def __init__(self, args):
+        super(StandardNormal, self).__init__()
+
+        self.D = args.latent_dim
+
+    def forward(self, q_z_x_params):
+        B = q_z_x_params.shape[0]
+
+        mean = torch.zeros((B, self.D), device=q_z_x_params.device)
+        scale = torch.ones((B, self.D), device=q_z_x_params.device)
+
+        standard_normal = td.Independent(td.Normal(loc=mean, scale=scale), 1)
+
+        return standard_normal
+
+
 class ConditionalGaussianBlockMADE(nn.Module):
     def __init__(self, args):
         super(ConditionalGaussianBlockMADE, self).__init__()
 
         self.D = args.latent_dim
 
-        hiddens = [int(h) for h in args.encoder_MADE_hidden_sizes.split("-")]
+        if hasattr(args, 'encoder_MADE_hidden_sizes'):
+            hiddens = [int(h) for h in args.encoder_MADE_hidden_sizes.split("-")]
+        else:
+            hiddens = [200, 220]
+
         print("Hidden sizes of the encoder made: ", hiddens)
 
         natural_ordering = True
@@ -208,7 +232,7 @@ class EncoderMLPBlock(nn.Module):
 
         # in -> 500 --> 256 -> q_z_x block
         self.encoder_mlp_block = nn.Sequential(
-            nn.Linear(in_features=self.image_w_h*self.image_w_h*self.C, out_features=500),
+            nn.Linear(in_features=self.image_w_h * self.image_w_h * self.C, out_features=500),
             nn.ReLU(),
             nn.Linear(in_features=500, out_features=256),
             nn.ReLU()

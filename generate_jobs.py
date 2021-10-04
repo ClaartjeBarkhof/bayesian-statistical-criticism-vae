@@ -7,22 +7,29 @@ batch = slurmjobs.SlurmBatch(
 
 # generate jobs across parameter grid
 run_script, job_paths = batch.generate([
-    ('p_z_type', ['mog']),  #,'mog'
-    ('decoder_MADE_hidden_sizes', ["2000-2000"]), #
-    ("latent_dim", [10])],  #, 32, 64
-    objective="VAE",
+    # ('p_z_type', ['isotropic_gaussian', 'mog']),
+    # ("q_z_x_type", ["standard_normal", "independent_gaussian"])
+    ("mdr_value", [8.0, 16.0, 24.0]),
+    # ('decoder_network_type', ['basic_mlp_decoder', 'basic_deconv_decoder', 'conditional_made_decoder', 'cond_pixel_cnn_pp']),
+    # ('decoder_MADE_hidden_sizes', ['2000-2000', '2000-2000-2000', '8000-8000'])
+    ],
     q_z_x_type="independent_gaussian",
-    decoder_network_type="conditional_made_decoder",
+    objective="MDR-VAE",
+    # q_z_x_type="standard_normal",
+    decoder_network_type="cond_pixel_cnn_pp",
+    p_z_type="isotropic_gaussian",
+    latent_dim=10,
     encoder_network_type="basic_conv_encoder",
+    encoder_MADE_hidden_sizes="2000-2000",
     decoder_MADE_gating=True,
     decoder_MADE_gating_mechanism=1,
-    mdr_value=8.0,
+    # mdr_value=8.0,
     mog_n_components=5,
     mdr_constraint_optim_lr=0.001,
     info_alpha=0.0,
     info_lambda=1000.0,
     batch_size=64,
-    max_epochs=120,
+    max_epochs=100,
     eval_ll_every_n_epochs=1,
     max_gradient_norm=1.0,
     num_workers=6,
@@ -35,7 +42,7 @@ run_script, job_paths = batch.generate([
     print_stats=True,
     print_every_n_steps=50,
     iw_n_samples=20,
-    run_name_prefix="(1 oct) ",
+    run_name_prefix="(4-oct) ",
     logging=True,
     log_every_n_steps=5,
     short_dev_run=False,
@@ -48,7 +55,7 @@ slurmjobs.util.summary(run_script, job_paths)
 basic_stuff = """#!/bin/bash
 #SBATCH -p gpu
 #SBATCH --gpus=1
-#SBATCH -t 04:00:00
+#SBATCH -t 03:00:00
 #SBATCH --mem 10G
 #SBATCH --output /home/cbarkhof/slurm-logs/%j-slurm-log.out
 

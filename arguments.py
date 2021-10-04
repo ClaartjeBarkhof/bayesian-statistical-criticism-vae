@@ -106,6 +106,7 @@ def prepare_parser(jupyter=False, print_settings=True):
                         help="Which type of posterior distribution to use, options:"
                              "  - independent_gaussian"
                              "  - conditional_gaussian_made"
+                             "  - standard_normal"
                              "  - iaf")
     # isotropic_gaussian, ...
     parser.add_argument("--p_z_type", default="isotropic_gaussian", type=str,
@@ -248,9 +249,14 @@ def make_run_name(args):
     date, time = datetime_stamp.split("--")[0], datetime_stamp.split("--")[1]
     date_time = f"{date}-{time}"
 
-    #name = f"q(z|x) {args.q_z_x_type} | p(x|z) {args.decoder_network_type} | p(z) {args.p_z_type} | D = {args.latent_dim} | {date_time}"
+    if args.objective == "MDR-VAE":
+        obj = f"MDR-VAE[{args.mdr_value}]"
+    else:
+        obj = args.obj
 
-    name = f"dec_made_hs {args.decoder_MADE_hidden_sizes} p(z) {args.p_z_type} D {args.latent_dim} | {date_time}"
+    name = f"{obj} | q(z|x) {args.q_z_x_type} | p(x|z) {args.decoder_network_type} | p(z) {args.p_z_type} | D = {args.latent_dim} | {date_time}"
+
+    # name = f"dec_made_hs {args.decoder_MADE_hidden_sizes} p(z) {args.p_z_type} D {args.latent_dim} | {date_time}"
 
     return args.run_name_prefix + name
 
@@ -288,7 +294,7 @@ def check_settings(args):
     check_valid_option(args.encoder_network_type, encoder_network_type_options, "encoder_network_type")
 
     # Posterior types
-    q_z_x_type_options = ["independent_gaussian", "conditional_gaussian_made", "iaf"]
+    q_z_x_type_options = ["independent_gaussian", "conditional_gaussian_made", "iaf", "standard_normal"]
     check_valid_option(args.q_z_x_type, q_z_x_type_options, "q_z_x_type")
 
     if args.q_z_x_type == "iaf":

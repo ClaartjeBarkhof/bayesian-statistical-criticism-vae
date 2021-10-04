@@ -168,14 +168,20 @@ class ConditionalBernoulliBlockMADE(nn.Module):
         self.X_dim = args.image_w_h * args.image_w_h * args.n_channels
         self.D = args.latent_dim
 
-        hiddens = [int(h) for h in args.decoder_MADE_hidden_sizes.split("-")]
+        if hasattr(args, 'decoder_MADE_hidden_sizes'):
+            hiddens = [int(h) for h in args.decoder_MADE_hidden_sizes.split("-")]
+            mech = args.decoder_MADE_gating_mechanism
+        else:
+            hiddens = [200, 220]
+            mech = 0
+
         print("Hidden sizes of the decoder made: ", hiddens)
         natural_ordering = True
         act = nn.ReLU()
 
         self.made = MADE(self.X_dim, hiddens, self.X_dim, natural_ordering=natural_ordering,
                          context_size=self.D, hidden_activation=act, gating=args.decoder_MADE_gating,
-                         gating_mechanism=args.decoder_MADE_gating_mechanism)
+                         gating_mechanism=mech)
 
     def forward(self, z):
         # Placeholder distribution object

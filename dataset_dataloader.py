@@ -3,7 +3,11 @@
 
 from torchvision import transforms, datasets
 from torch.utils.data import DataLoader, Subset
+import numpy as np
+import torch
+import torch.utils.data as data_utils
 
+import os
 
 # from datasets import load_from_disk
 # from transformers import AutoTokenizer, AutoModel
@@ -62,9 +66,9 @@ class ImageDataset:
         # LOADING DATA SETS
         # -------------------------------
 
-        # MNIST + BMNIST
+        # MNIST
         # Sizes: train, valid, test = 55000, 5000, 10000
-        if self.image_dataset_name in ["mnist", "bmnist"]:
+        if self.image_dataset_name == "mnist":
             self.train_set = Subset(
                 datasets.MNIST(self.data_dir, train=True, download=True, transform=self.img_transforms),
                 indices=range(55000))
@@ -85,6 +89,31 @@ class ImageDataset:
                 indices=range(55000, 60000))
             self.test_set = datasets.FashionMNIST(self.data_dir, train=False, download=True,
                                                   transform=self.img_transforms)
+        # BMNIST
+        else:
+            with open(f'{self.data_dir}/BMNIST/binarized_mnist_train.amat') as f:
+                lines = f.readlines()
+            x_train = lines_to_np_array(lines).astype('float32')
+            with open(f'{self.data_dir}/BMNIST/binarized_mnist_valid.amat') as f:
+                lines = f.readlines()
+            x_val = lines_to_np_array(lines).astype('float32')
+            with open(f'{self.data_dir}/BMNIST/binarized_mnist_test.amat') as f:
+                lines = f.readlines()
+
+            x_test = lines_to_np_array(lines).astype('float32')
+
+            # shuffle train data
+            # np.random.shuffle(x_train)
+
+            # idle y's
+            y_train = np.zeros((x_train.shape[0], 1))
+            y_val = np.zeros((x_val.shape[0], 1))
+            y_test = np.zeros((x_test.shape[0], 1))
+
+            # pytorch data loader
+            self.train_set = data_utils.TensorDataset(torch.from_numpy(x_train).reshape(len(x_train), 1, 28, 28).float(), torch.from_numpy(y_train))
+            self.valid_set = data_utils.TensorDataset(torch.from_numpy(x_val).reshape(len(x_val), 1, 28, 28).float(), torch.from_numpy(y_val))
+            self.test_set = data_utils.TensorDataset(torch.from_numpy(x_test).reshape(len(x_test), 1, 28, 28).float(), torch.from_numpy(y_test))
 
     def train_loader(self):
         train_loader = DataLoader(self.train_set, batch_size=self.batch_size, shuffle=True,
@@ -106,8 +135,9 @@ class ImageDataset:
                                   num_workers=workers)
         return valid_loader
 
-    def test_loader(self):
-        test_loader = DataLoader(self.test_set, batch_size=self.batch_size, shuffle=False, num_workers=self.num_workers)
+    def test_loader(self, batch_size=None):
+        test_loader = DataLoader(self.test_set,
+                                 batch_size=self.batch_size if batch_size is None else batch_size, shuffle=False, num_workers=self.num_workers)
         return test_loader
 
     def get_train_validation_loaders(self):
@@ -121,3 +151,22 @@ def greater_than_zero(x):
 
 def to_float(x):
     return x.float()
+
+
+
+def lines_to_np_array(lines):
+    return np.array([[int(i) for i in line.split()] for line in lines])
+
+if __name__=="__main__":
+    from arguments import prepare_parser
+    import matplotlib.pyplot as plt
+
+    config = prepare_parser(jupyter=False, print_settings=True)
+    dataset = ImageDataset(args=config)
+    train_loader = dataset.train_loader()
+
+    for (X, y) in train_loader:
+        print(X.shape, y.shape)
+        # plt.hist(X.flatten().numpy())
+        plt.show()
+        break

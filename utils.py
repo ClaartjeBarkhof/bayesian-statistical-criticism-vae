@@ -248,7 +248,7 @@ def make_checkpoint(model, args, optimisers, epoch, step, mean_reduced_epoch_sta
     torch.save(state, c_path)
 
 
-def load_checkpoint_model_for_eval(checkpoint_path, map_location="cuda:0"):
+def load_checkpoint_model_for_eval(checkpoint_path, map_location="cuda:0", return_args=False):
     checkpoint = torch.load(checkpoint_path, map_location=map_location)
 
     if "args" in checkpoint:
@@ -273,5 +273,8 @@ def load_checkpoint_model_for_eval(checkpoint_path, map_location="cuda:0"):
         l = checkpoint["best_val_loss"]
         print(f"best val loss {l:.2f}")
 
-    return vae_model
+    if return_args:
+        return vae_model, args
+    else:
+        return vae_model
 
