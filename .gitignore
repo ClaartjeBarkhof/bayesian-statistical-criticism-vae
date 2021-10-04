@@ -140,3 +140,4 @@ check_inference_model.ipynb
 /wandb/
 /notebooks/knnclassifier.pickle
 /jobs/
+/notebooks/
