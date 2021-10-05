@@ -17,7 +17,9 @@ def init_logging(vae_model, args):
     # Define the custom x axis metric
 
     phases = ["train", "valid"]
-    metrics = ["total_loss", "mmd", "elbo", "mdr_loss", "mdr_multiplier", "distortion", "kl_prior_post", "iw_ll"]
+    metrics = ["total_loss", "mmd", "elbo", "mdr_loss", "mdr_multiplier", "distortion", "kl_fb",
+               "mmd_constraint_loss", "mmd_constraint_multiplier", "elbo_constraint_multiplier",
+               "elbo_constraint_loss", "lambda_2_MMD", "lambda_1_ELBO", "kl_prior_post", "iw_ll"]
 
     # Plot all batch metrics against global step
     wandb.define_metric("global step")

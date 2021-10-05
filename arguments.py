@@ -29,8 +29,8 @@ def prepare_parser(jupyter=False, print_settings=True):
 
     # FB-VAE
     parser.add_argument("--free_bits", default=5.0, type=float, help="The number of Free bits.")
-    # TODO: parser.add_argument("--free_bits_per_dimension", default=True, type=lambda x: bool(distutils.util.strtobool(x)),
-    #                     help="Whether or not to apply the Free bits per dimension or with the dimensions combined.")
+    parser.add_argument("--free_bits_per_dimension", default=True, type=lambda x: bool(distutils.util.strtobool(x)),
+                        help="Whether or not to apply the Free bits per dimension or with the dimensions combined.")
 
     # MDR-VAE
     parser.add_argument("--mdr_value", default=16.0, type=float,
@@ -39,10 +39,27 @@ def prepare_parser(jupyter=False, print_settings=True):
                         help="The learning rate for the MDR constraint optimiser.")
 
     # INFO-VAE
-    parser.add_argument("--info_alpha", default=0.0, type=float,
-                        help="The alpha parameter in the INFO-VAE objective (Zhao et al., 2017).")
-    parser.add_argument("--info_lambda", default=1000.0, type=float,
-                        help="The lambda parameter in the INFO-VAE objective (Zhao et al., 2017).")
+    # parser.add_argument("--info_alpha", default=0.0, type=float,
+    #                     help="The alpha parameter in the INFO-VAE objective (Zhao et al., 2017).")
+    # parser.add_argument("--info_lambda", default=1000.0, type=float,
+    #                     help="The lambda parameter in the INFO-VAE objective (Zhao et al., 2017).")
+    parser.add_argument("--info_lambda_1", default=1.0, type=float,
+                        help="The lambda_1 parameter (for the ELBO term) in the INFO-VAE objective as described in "
+                             "the Lagrangian VAE paper!.")
+    parser.add_argument("--info_lambda_2", default=100.0, type=float,
+                        help="The lambda_2 parameter (for the ELBO term) in the INFO-VAE objective as described in "
+                             "the Lagrangian VAE paper!.")
+
+    # LAG-INFO-VAE
+    parser.add_argument("--min_elbo_constraint_value", default=-90.0, type=float,
+                        help="The negative ELBO constraint of Lagrangian InfoVAE (-ELBO <= val).")
+    parser.add_argument("--min_elbo_constraint_optim_lr", default=0.001, type=float,
+                        help="The negative ELBO constraint optimiser learning rate.")
+
+    parser.add_argument("--mmd_constraint_value", default=0.01, type=float,
+                        help="The MMD constraint of Lagrangian InfoVAE (MMD <= val).")
+    parser.add_argument("--mmd_constraint_optim_lr", default=0.001, type=float,
+                        help="The negative ELBO constraint optimiser learning rate.")
 
     # ----------------------------------------------------------------------------------------------------------------
     # BATCHES / TRAIN STEPS
@@ -242,17 +259,27 @@ def get_code_dir():
 
 
 def make_run_name(args):
-    # name = f"{args.objective} | {args.image_dataset_name.upper()} ({args.data_distribution}) | Q_Z_X: {args.q_z_x_type} " \
-    #        f"P_Z: {args.p_z_type} P_X_Z: {args.p_x_z_type} DECODER-TYPE: {args.decoder_network_type}"
-
     datetime_stamp = datetime.datetime.now().strftime("%Y-%m-%d--%H:%M:%S")
     date, time = datetime_stamp.split("--")[0], datetime_stamp.split("--")[1]
     date_time = f"{date}-{time}"
 
     if args.objective == "MDR-VAE":
-        obj = f"MDR-VAE[{args.mdr_value}]"
+        obj = f"MDR-VAE[R>={args.mdr_value}]"
+
+    elif args.objective == "FB-VAE":
+        obj = f"FB-VAE[{args.free_bits}-pd={args.free_bits_per_dimension}]"
+
+    elif args.objective == "BETA-VAE":
+        obj = f"B-VAE[b={args.beta_beta}]"
+
+    elif args.objective == "INFO-VAE":
+        obj = f"INFO-VAE[l_1={args.info_lambda_1}, l_2={args.info_lambda_2}]"
+
+    elif args.objective == "LAG-INFO-VAE":
+        obj = f"LAG-INFO-VAE[-elbo<={args.min_elbo_constraint_value}, mmd<={args.mmd_constraint_value}]"
+
     else:
-        obj = args.obj
+        obj = args.objective
 
     name = f"{obj} | q(z|x) {args.q_z_x_type} | p(x|z) {args.decoder_network_type} | p(z) {args.p_z_type} | D = {args.latent_dim} | {date_time}"
 
@@ -278,9 +305,6 @@ def check_settings(args):
     # Objective
     objective_options = ["VAE", "AE", "FB-VAE", "BETA-VAE", "MDR-VAE", "INFO-VAE", "LAG-INFO-VAE"]
     check_valid_option(args.objective, objective_options, "objective")
-
-    if args.objective == "LAG-VAE" or args.objective == "LAG-INFO-VAE":
-        raise NotImplementedError
 
     # Decoder network types
     decoder_network_type_options = ["basic_mlp_decoder", "basic_deconv_decoder", "conditional_made_decoder", "cond_pixel_cnn_pp"]

@@ -30,11 +30,24 @@ class Objective(nn.Module):
         self.image_or_language = args.image_or_language
         self.args = args
 
+        # MDR-VAE
         self.mdr_constraint = self.get_mdr_constraint()
+
+        # LAG-INFO-VAE
+        self.min_elbo_constraint, self.mmd_constraint = self.get_info_vae_constraints()
 
     def get_mdr_constraint(self):
         return Constraint(self.args.mdr_value, "ge", alpha=0.5).to(
             self.device) if self.args.objective == "MDR-VAE" else None
+
+    def get_info_vae_constraints(self):
+        # -ELBO <= val
+        min_elbo_constraint = Constraint(self.args.min_elbo_constraint_value, "le", alpha=0.5).to(
+            self.device) if self.args.objective == "LAG-INFO-VAE" else None
+        # MMD <= val
+        mmd_constraint = Constraint(self.args.mmd_constraint_value, "le", alpha=0.5).to(
+            self.device) if self.args.objective == "LAG-INFO-VAE" else None
+        return min_elbo_constraint, mmd_constraint
 
     def compute_loss(self, x_in, q_z_x, z_post, p_z, p_x_z):
         """
@@ -86,7 +99,8 @@ class Objective(nn.Module):
 
         elbo = - (distortion + kl_prior_post)
 
-        total_loss, mdr_loss, mdr_multiplier = None, None, None
+        total_loss = None
+        loss_dict = dict()
 
         if self.args.objective == "AE":
             total_loss = distortion
@@ -95,39 +109,67 @@ class Objective(nn.Module):
             total_loss = -elbo
 
         elif self.args.objective == "BETA-VAE":
-            total_loss = distortion + self.args.beta_beta
+            beta_kl = self.args.beta_beta * kl_prior_post
+            total_loss = distortion + beta_kl
+            loss_dict["beta_kl"] = beta_kl
 
         elif self.args.objective == "MDR-VAE":
             # the gradients for the constraints are recorded at some other point
             mdr_loss = self.mdr_constraint(kl_prior_post).squeeze()
             mdr_multiplier = self.mdr_constraint.multiplier
+            loss_dict["mdr_loss"] = mdr_loss
+            loss_dict["mdr_multiplier"] = mdr_multiplier
+
             total_loss = distortion + kl_prior_post + mdr_loss
 
         elif self.args.objective == "FB-VAE":
-            # TODO:
-            raise NotImplementedError
+            kl_fb = self.free_bits_kl(p_z=p_z, q_z_x=q_z_x, z_post=z_post, free_bits=self.args.free_bits,
+                                      per_dimension=self.args.free_bits_per_dimension)
+            loss_dict["kl_fb"] = kl_fb
+            total_loss = distortion + kl_fb
 
         elif self.args.objective == "INFO-VAE":
+            # from the original paper:
             # gain = ll - (1 - a)*kl_prior_post - (a + l - 1)*marg_kl
             # loss = distortion + (1 - a)*kl_prior_post + (a + l - 1)*marg_kl
-            total_loss = distortion + ((1 - self.args.info_alpha) * kl_prior_post) \
-                         + ((self.args.info_alpha + self.args.info_lambda - 1) * mmd)
+            # total_loss = distortion + ((1 - self.args.info_alpha) * kl_prior_post) \
+            #              + ((self.args.info_alpha + self.args.info_lambda - 1) * mmd)
+
+            # rewriting in the LagVAE paper as:
+            # MI maximisation: D + l_1 * -ELBO + l_2 * MMD
+            lambda_1_ELBO = self.args.info_lambda_1 * -elbo
+            lambda_2_MMD = self.args.info_lambda_2 * mmd
+            total_loss = distortion + lambda_1_ELBO + lambda_2_MMD
+
+            # Add losses to dict
+            loss_dict["lambda_1_ELBO"] = lambda_1_ELBO
+            loss_dict["lambda_2_MMD"] = lambda_2_MMD
 
         elif self.args.objective == "LAG-INFO-VAE":
-            # TODO: https://github.com/ermongroup/lagvae/blob/master/methods/lagvae.py
-            raise NotImplementedError
+            # Assemble loss
+            elbo_constraint_loss = self.min_elbo_constraint(-elbo)
+            elbo_constraint_multiplier = self.min_elbo_constraint.multiplier
+
+            mmd_constraint_loss = self.mmd_constraint(mmd)
+            mmd_constraint_multiplier = self.mmd_constraint.multiplier
+
+            total_loss = distortion + elbo_constraint_loss + mmd_constraint_loss
+
+            # Add losses to dict
+            loss_dict["elbo_constraint_loss"] = elbo_constraint_loss
+            loss_dict["elbo_constraint_multiplier"] = elbo_constraint_multiplier
+            loss_dict["mmd_constraint_loss"] = mmd_constraint_loss
+            loss_dict["mmd_constraint_multiplier"] = mmd_constraint_multiplier
 
         posterior_stats = self.get_posterior_stats(q_z_x, z_post)
 
-        loss_dict = dict(
+        loss_dict = {**loss_dict, **dict(
             total_loss=total_loss,
             mmd=mmd,
             elbo=elbo,
-            mdr_loss=mdr_loss,
-            mdr_multiplier=mdr_multiplier,
             distortion=distortion,
             kl_prior_post=kl_prior_post
-        )
+        )}
 
         loss_dict = {**loss_dict, **posterior_stats}
 
@@ -160,38 +202,46 @@ class Objective(nn.Module):
 
     @staticmethod
     def free_bits_kl(p_z, q_z_x, z_post, free_bits=0.5, per_dimension=True):
-        # TODO: come up with solution for the fact that if p_z is of type MixtureSameFamily,
-        # TODO: the latent dimensions are automatically reduced due to the component distribution being of type Independent
+        # Per dimension
+        if per_dimension:
+            # Retrieve the means, scales to make a distribution that does not reduce the latent
+            # dimension when calling log_prob (reinterpreted_batch_ndims = 0)
+            if isinstance(q_z_x, AutoRegressiveDistribution):
+                (mean, scale) = q_z_x.params
+                mean, scale = mean[0, :, :], scale[0, :, :]
+            elif isinstance(p_z, td.MixtureSameFamily):
+                # TODO: not sure how to implement this
+                raise NotImplementedError
+            # Independent Normal
+            else:
+                mean, scale = q_z_x.base_dist.loc, q_z_x.base_dist.scale
 
-        if isinstance(q_z_x, AutoRegressiveDistribution):
-            (mean, scale) = q_z_x.params
-            mean, scale = mean[0, :, :], scale[0, :, :]
+            # [S, B, D] -> [B, D] (avg. over sample dim.)
+            log_p_z = td.Normal(loc=torch.zeros_like(mean), scale=torch.ones_like(scale)).log_prob(z_post).mean(dim=0)
 
-        # Independent Normal
+            # [S, B, D] -> [B, D] (avg. over sample dim.)
+            log_q_z_x = td.Normal(mean, scale).log_prob(z_post).mean(dim=0)
+
+            # KL ( q(z|x) || p(z) )
+            kl = log_q_z_x - log_p_z
+
+            # Free bits operation KL_FB = max(FB, KL), so the KL can not be lower than threshold
+            kl_fb = torch.clamp(kl, min=free_bits)
+
+            # Reduce latent dim
+            kl_fb = kl_fb.sum(dim=-1)
+
+        # Not per dimension
         else:
-            mean, scale = q_z_x.base_dist.loc, q_z_x.base_dist.scale
+            # [S, B] -> [B] (avg. sample dim.)
+            log_q_z_x = q_z_x.log_prob(z_post).mean(dim=0)
+            log_p_z = p_z.log_prob(z_post).mean(dim=0)
 
-        # mean, scale = [B, D]
+            # [B]
+            kl = log_q_z_x - log_p_z
 
-        # average over the sample dim and latent dim: [S, B, D] - > [B]
-        log_q_z_x = td.Normal(mean, scale).log_prob(z_post).mean(dim=0).mean(dim=1)  # TODO: get rid of this second mean
-        log_p_z = p_z.log_prob(z_post).mean(dim=0)
-
-        kl = log_q_z_x - log_p_z
-
-        # TODO: reintroduce this if stement
-        # # [B, D] -> [B]
-        # if not per_dimension:
-        #     kl = kl.mean(dim=1)
-
-        # Ignore the dimensions of which the KL-div is already under the
-        # threshold, avoiding driving it down even further. Those values do
-        # not have to be replaced by the threshold because that would not mean
-        # anything to the gradient. That's why they are simply removed. This
-        # confused me at first.
-        kl_mask = (kl > free_bits).float()
-
-        kl_fb = kl * kl_mask
+            # Free bits operation KL_FB = max(FB, KL), so the KL can not be lower than threshold
+            kl_fb = torch.clamp(kl, min=free_bits)
 
         return kl_fb.mean()
 
