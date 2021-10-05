@@ -34,20 +34,22 @@ class Objective(nn.Module):
         self.mdr_constraint = self.get_mdr_constraint()
 
         # LAG-INFO-VAE
-        self.min_elbo_constraint, self.mmd_constraint = self.get_info_vae_constraints()
+        self.rate_constraint, self.mmd_constraint = self.get_lag_info_vae_constraints()
 
     def get_mdr_constraint(self):
         return Constraint(self.args.mdr_value, "ge", alpha=0.5).to(
             self.device) if self.args.objective == "MDR-VAE" else None
 
-    def get_info_vae_constraints(self):
-        # -ELBO <= val
-        min_elbo_constraint = Constraint(self.args.min_elbo_constraint_value, "le", alpha=0.5).to(
-            self.device) if self.args.objective == "LAG-INFO-VAE" else None
-        # MMD <= val
-        mmd_constraint = Constraint(self.args.mmd_constraint_value, "le", alpha=0.5).to(
-            self.device) if self.args.objective == "LAG-INFO-VAE" else None
-        return min_elbo_constraint, mmd_constraint
+    def get_lag_info_vae_constraints(self):
+        if self.args.objective == "LAG-INFO-VAE":
+            rate_constraint = Constraint(self.args.rate_constraint_val,
+                                         self.args.rate_constraint_rel, alpha=0.5).to(self.device)
+            mmd_constraint = Constraint(self.args.mmd_constraint_val,
+                                        self.args.mmd_constraint_rel, alpha=0.5).to(self.device)
+        else:
+            rate_constraint, mmd_constraint = None, None
+
+        return rate_constraint, mmd_constraint
 
     def compute_loss(self, x_in, q_z_x, z_post, p_z, p_x_z):
         """
@@ -137,27 +139,27 @@ class Objective(nn.Module):
 
             # rewriting in the LagVAE paper as:
             # MI maximisation: D + l_1 * -ELBO + l_2 * MMD
-            lambda_1_ELBO = self.args.info_lambda_1 * -elbo
-            lambda_2_MMD = self.args.info_lambda_2 * mmd
-            total_loss = distortion + lambda_1_ELBO + lambda_2_MMD
+            lambda_1_Rate = self.args.info_lambda_1_rate * kl_prior_post
+            lambda_2_MMD = self.args.info_lambda_2_mmd * mmd
+            total_loss = distortion + lambda_1_Rate + lambda_2_MMD
 
             # Add losses to dict
-            loss_dict["lambda_1_ELBO"] = lambda_1_ELBO
+            loss_dict["lambda_1_Rate"] = lambda_1_Rate
             loss_dict["lambda_2_MMD"] = lambda_2_MMD
 
         elif self.args.objective == "LAG-INFO-VAE":
             # Assemble loss
-            elbo_constraint_loss = self.min_elbo_constraint(-elbo)
-            elbo_constraint_multiplier = self.min_elbo_constraint.multiplier
+            rate_constraint_loss = self.rate_constraint(kl_prior_post)
+            rate_constraint_multiplier = self.rate_constraint.multiplier
 
             mmd_constraint_loss = self.mmd_constraint(mmd)
             mmd_constraint_multiplier = self.mmd_constraint.multiplier
 
-            total_loss = distortion + elbo_constraint_loss + mmd_constraint_loss
+            total_loss = distortion + rate_constraint_loss + mmd_constraint_loss
 
             # Add losses to dict
-            loss_dict["elbo_constraint_loss"] = elbo_constraint_loss
-            loss_dict["elbo_constraint_multiplier"] = elbo_constraint_multiplier
+            loss_dict["rate_constraint_loss"] = rate_constraint_loss
+            loss_dict["rate_constraint_multiplier"] = rate_constraint_multiplier
             loss_dict["mmd_constraint_loss"] = mmd_constraint_loss
             loss_dict["mmd_constraint_multiplier"] = mmd_constraint_multiplier
 

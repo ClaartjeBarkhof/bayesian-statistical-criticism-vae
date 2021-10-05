@@ -18,8 +18,8 @@ def init_logging(vae_model, args):
 
     phases = ["train", "valid"]
     metrics = ["total_loss", "mmd", "elbo", "mdr_loss", "mdr_multiplier", "distortion", "kl_fb",
-               "mmd_constraint_loss", "mmd_constraint_multiplier", "elbo_constraint_multiplier",
-               "elbo_constraint_loss", "lambda_2_MMD", "lambda_1_ELBO", "kl_prior_post", "iw_ll"]
+               "mmd_constraint_loss", "mmd_constraint_multiplier", "rate_constraint_multiplier",
+               "rate_constraint_loss", "lambda_2_MMD", "lambda_1_Rate", "kl_prior_post", "iw_ll"]
 
     # Plot all batch metrics against global step
     wandb.define_metric("global step")
@@ -41,6 +41,7 @@ def init_logging(vae_model, args):
             wandb.define_metric(f"layer_{i}_avg_gate_value", step_metric="epoch")
             wandb.define_metric(f"layer_{i}_std_gate_value", step_metric="epoch")
 
+    # scp -r cbarkhof@login-gpu.lisa.surfsara.nl:/home/cbarkhof/code-thesis/NewsVAE/Runs "/Users/claartje/Dropbox/XXXX Studie/Master AI/Thesis/code-thesis"
     # wandb.init(name=args.run_name, project=args.wandb_project, config=args)
     # wandb.watch(vae_model) this gives an error on LISA
 

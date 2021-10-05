@@ -43,23 +43,33 @@ def prepare_parser(jupyter=False, print_settings=True):
     #                     help="The alpha parameter in the INFO-VAE objective (Zhao et al., 2017).")
     # parser.add_argument("--info_lambda", default=1000.0, type=float,
     #                     help="The lambda parameter in the INFO-VAE objective (Zhao et al., 2017).")
-    parser.add_argument("--info_lambda_1", default=1.0, type=float,
-                        help="The lambda_1 parameter (for the ELBO term) in the INFO-VAE objective as described in "
-                             "the Lagrangian VAE paper!.")
-    parser.add_argument("--info_lambda_2", default=100.0, type=float,
-                        help="The lambda_2 parameter (for the ELBO term) in the INFO-VAE objective as described in "
-                             "the Lagrangian VAE paper!.")
+    parser.add_argument("--info_lambda_1_rate", default=1.0, type=float,
+                        help="The lambda_1 parameter (for the Rate term) in the INFO-VAE objective as described in "
+                             "the Lagrangian VAE paper.")
+    parser.add_argument("--info_lambda_2_mmd", default=100.0, type=float,
+                        help="The lambda_2 parameter (for the MMD term) in the INFO-VAE objective as described in "
+                             "the Lagrangian VAE paper.")
 
     # LAG-INFO-VAE
-    parser.add_argument("--min_elbo_constraint_value", default=-90.0, type=float,
-                        help="The negative ELBO constraint of Lagrangian InfoVAE (-ELBO <= val).")
-    parser.add_argument("--min_elbo_constraint_optim_lr", default=0.001, type=float,
-                        help="The negative ELBO constraint optimiser learning rate.")
+    parser.add_argument("--rate_constraint_val", default=16.0, type=float,
+                        help="The rate constraint value of the Lagrangian InfoVAE objective.")
+    parser.add_argument("--rate_constraint_rel", default="eq", type=str,
+                        help="The relation for the rate constraint in the Lagrangian InfoVAE objective, options:"
+                             "- 'ge' = '>='"
+                             "- 'le' = '<='"
+                             "- 'eq' = '='")
+    parser.add_argument("--rate_constraint_lr", default=0.001, type=float,
+                        help="The rate constraint optimiser learning rate.")
 
-    parser.add_argument("--mmd_constraint_value", default=0.01, type=float,
-                        help="The MMD constraint of Lagrangian InfoVAE (MMD <= val).")
-    parser.add_argument("--mmd_constraint_optim_lr", default=0.001, type=float,
-                        help="The negative ELBO constraint optimiser learning rate.")
+    parser.add_argument("--mmd_constraint_val", default=0.005, type=float,
+                        help="The MMD constraint value of the Lagrangian InfoVAE objective.")
+    parser.add_argument("--mmd_constraint_rel", default="le", type=str,
+                        help="The relation for the MMD constraint in the Lagrangian InfoVAE objective, options:"
+                             "- 'ge' = '>='"
+                             "- 'le' = '<='"
+                             "- 'eq' = '='")
+    parser.add_argument("--mmd_constraint_lr", default=0.001, type=float,
+                        help="The MMD constraint optimiser learning rate.")
 
     # ----------------------------------------------------------------------------------------------------------------
     # BATCHES / TRAIN STEPS
@@ -273,10 +283,10 @@ def make_run_name(args):
         obj = f"B-VAE[b={args.beta_beta}]"
 
     elif args.objective == "INFO-VAE":
-        obj = f"INFO-VAE[l_1={args.info_lambda_1}, l_2={args.info_lambda_2}]"
+        obj = f"INFO-VAE[l_1_rate={args.info_lambda_1_rate}, l_2_mmd={args.info_lambda_2_mmd}]"
 
     elif args.objective == "LAG-INFO-VAE":
-        obj = f"LAG-INFO-VAE[-elbo<={args.min_elbo_constraint_value}, mmd<={args.mmd_constraint_value}]"
+        obj = f"LAG-INFO-VAE[rate-{args.rate_constraint_rel}-{args.rate_constraint_val}, mmd-{args.mmd_constraint_rel}-{args.mmd_constraint_val}]"
 
     else:
         obj = args.objective

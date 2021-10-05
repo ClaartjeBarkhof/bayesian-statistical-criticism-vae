@@ -38,15 +38,15 @@ class Trainer:
 
         elif self.args.objective == "LAG-INFO-VAE":
             # noinspection PyTypeChecker
-            min_elbo_constraint_optimiser = ConstraintOptimizer(torch.optim.RMSprop,
-                                                                self.objective.min_elbo_constraint.parameters(),
-                                                                self.args.min_elbo_constraint_optim_lr)
+            rate_constraint_optimiser = ConstraintOptimizer(torch.optim.RMSprop,
+                                                            self.objective.rate_constraint.parameters(),
+                                                            self.args.rate_constraint_lr)
             # noinspection PyTypeChecker
             mmd_constraint_optimiser = ConstraintOptimizer(torch.optim.RMSprop,
                                                            self.objective.mmd_constraint.parameters(),
-                                                           self.args.mmd_constraint_optim_lr)
+                                                           self.args.mmd_constraint_lr)
             return dict(inf_optimiser=inf_optimiser, gen_optimiser=gen_optimiser,
-                        min_elbo_constraint_optimiser=min_elbo_constraint_optimiser,
+                        rate_constraint_optimiser=rate_constraint_optimiser,
                         mmd_constraint_optimiser=mmd_constraint_optimiser)
 
         else:
