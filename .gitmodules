@@ -13,3 +13,6 @@
 [submodule "torch-two-sample"]
 	path = torch-two-sample
 	url = https://github.com/josipd/torch-two-sample.git
+[submodule "bda"]
+	path = bda
+	url = https://github.com/probabll/bda.git

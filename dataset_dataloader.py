@@ -102,42 +102,47 @@ class ImageDataset:
 
             x_test = lines_to_np_array(lines).astype('float32')
 
-            # shuffle train data
-            # np.random.shuffle(x_train)
-
-            # idle y's
-            y_train = np.zeros((x_train.shape[0], 1))
-            y_val = np.zeros((x_val.shape[0], 1))
-            y_test = np.zeros((x_test.shape[0], 1))
+            # KNN predicted ys
+            y_train = torch.load(f'{self.data_dir}/BMNIST/binarized_mnist_train_KNN_pred_y.pt')
+            y_val = torch.load(f'{self.data_dir}/BMNIST/binarized_mnist_valid_KNN_pred_y.pt')
+            y_test = torch.load(f'{self.data_dir}/BMNIST/binarized_mnist_test_KNN_pred_y.pt')
 
             # pytorch data loader
-            self.train_set = data_utils.TensorDataset(torch.from_numpy(x_train).reshape(len(x_train), 1, 28, 28).float(), torch.from_numpy(y_train))
-            self.valid_set = data_utils.TensorDataset(torch.from_numpy(x_val).reshape(len(x_val), 1, 28, 28).float(), torch.from_numpy(y_val))
-            self.test_set = data_utils.TensorDataset(torch.from_numpy(x_test).reshape(len(x_test), 1, 28, 28).float(), torch.from_numpy(y_test))
+            self.train_set = data_utils.TensorDataset(torch.from_numpy(x_train).reshape(
+                len(x_train), 1, 28, 28).float(), y_train)
+            self.valid_set = data_utils.TensorDataset(torch.from_numpy(x_val).reshape(
+                len(x_val), 1, 28, 28).float(), y_val)
+            self.test_set = data_utils.TensorDataset(torch.from_numpy(x_test).reshape(
+                len(x_test), 1, 28, 28).float(), y_test)
 
-    def train_loader(self):
-        train_loader = DataLoader(self.train_set, batch_size=self.batch_size, shuffle=True,
+            # idle y's
+            # y_train = np.zeros((x_train.shape[0], 1))
+            # y_val = np.zeros((x_val.shape[0], 1))
+            # y_test = np.zeros((x_test.shape[0], 1))
+            #
+            # # pytorch data loader
+            # self.train_set = data_utils.TensorDataset(
+            #     torch.from_numpy(x_train).reshape(len(x_train), 1, 28, 28).float(), torch.from_numpy(y_train))
+            # self.valid_set = data_utils.TensorDataset(torch.from_numpy(x_val).reshape(len(x_val), 1, 28, 28).float(),
+            #                                           torch.from_numpy(y_val))
+            # self.test_set = data_utils.TensorDataset(torch.from_numpy(x_test).reshape(len(x_test), 1, 28, 28).float(),
+            #                                          torch.from_numpy(y_test))
+
+    def train_loader(self, shuffle=True):
+        train_loader = DataLoader(self.train_set, batch_size=self.batch_size, shuffle=shuffle,
                                   num_workers=self.num_workers)
         return train_loader
 
-    def valid_loader(self, num_workers=None, batch_size=None):
-        if num_workers is not None:
-            workers = num_workers
-        else:
-            workers = self.num_workers
-
-        if batch_size is not None:
-            b = batch_size
-        else:
-            b = self.batch_size
-
-        valid_loader = DataLoader(self.valid_set, batch_size=b, shuffle=False,
-                                  num_workers=workers)
+    def valid_loader(self, num_workers=None, batch_size=None, shuffle=False):
+        valid_loader = DataLoader(self.valid_set, shuffle=shuffle,
+                                  batch_size=self.batch_size if batch_size is None else batch_size,
+                                  num_workers=self.num_workers if num_workers is None else num_workers)
         return valid_loader
 
-    def test_loader(self, batch_size=None):
+    def test_loader(self, batch_size=None, shuffle=False):
         test_loader = DataLoader(self.test_set,
-                                 batch_size=self.batch_size if batch_size is None else batch_size, shuffle=False, num_workers=self.num_workers)
+                                 batch_size=self.batch_size if batch_size is None else batch_size,
+                                 shuffle=shuffle, num_workers=self.num_workers)
         return test_loader
 
     def get_train_validation_loaders(self):
@@ -153,7 +158,6 @@ def to_float(x):
     return x.float()
 
 
-
 def lines_to_np_array(lines):
     return np.array([[int(i) for i in line.split()] for line in lines])
 
@@ -163,9 +167,9 @@ if __name__=="__main__":
 
     config = prepare_parser(jupyter=False, print_settings=True)
     dataset = ImageDataset(args=config)
-    train_loader = dataset.train_loader()
+    loader = dataset.train_loader()
 
-    for (X, y) in train_loader:
+    for (X, y) in loader:
         print(X.shape, y.shape)
         # plt.hist(X.flatten().numpy())
         plt.show()

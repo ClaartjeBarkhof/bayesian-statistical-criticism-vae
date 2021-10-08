@@ -1,11 +1,15 @@
 import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
 import torch
+import os
+import pickle
 from arguments import prepare_parser
 from dataset_dataloader import ImageDataset
 from vae_model.distributions import AutoRegressiveDistribution
 import numpy as np
 import scipy.stats
 from scipy.stats import chisquare
+import wandb
 
 
 def collect_encodings(vae_model, data_X, Sz=1):
@@ -29,7 +33,7 @@ def get_n_data_samples_x_y(image_dataset_name="bmnist", N_samples=500):
     data_X, data_y = [], []
 
     # [B, C, W, H] [B]
-    for i, (X, y) in enumerate(dataset.valid_loader(num_workers=1, batch_size=100)):
+    for i, (X, y) in enumerate(dataset.valid_loader(num_workers=1, batch_size=100, shuffle=True)):
         data_X.append(X)
         data_y.append(y)
 
@@ -41,7 +45,7 @@ def get_n_data_samples_x_y(image_dataset_name="bmnist", N_samples=500):
     return data_X[:N_samples], data_y[:N_samples]
 
 
-def plot_posterior_analysis_grid(vae_model, plot_name, plot_dir, data_X, data_y, n_sampled_reconstructions=5):
+def plot_posterior_analysis_grid(vae_model, data_X, data_y, n_sampled_reconstructions=5, plot_name=None, plot_dir=None):
     with torch.no_grad():
 
         # data sample, iw ll, ...sampled_reconstructions...
@@ -51,6 +55,7 @@ def plot_posterior_analysis_grid(vae_model, plot_name, plot_dir, data_X, data_y,
         for digit in range(10):
             # [B=1, C=1, W, H]
             data_sample = data_X[data_y == digit][0].unsqueeze(0)  # create a synthetic batch dim.
+
             axs[digit, 0].imshow(data_sample[0, 0, :, :].numpy(), cmap="Greys")
             axs[digit, 0].set_title("Data sample", size=7)
 
@@ -71,13 +76,18 @@ def plot_posterior_analysis_grid(vae_model, plot_name, plot_dir, data_X, data_y,
                 for col in range(n_sampled_reconstructions + 2):
                     axs[row, col].axis('off')
 
-        plt.suptitle(plot_name, size=14, y=0.94)
-        plt.savefig(f"{plot_dir}/{plot_name}.jpg", dpi=300)
-        plt.show()
+        if plot_name is not None and plot_dir is not None:
+            os.makedirs(plot_dir, exist_ok=True)
+            plt.suptitle(plot_name, size=14, y=0.94)
+            plt.savefig(f"{plot_dir}/{plot_name}.jpg", dpi=300)
+            plt.show()
 
 
-def do_prior_analysis(vae_model, knn_classifier,  data_X, data_y, gen_batch_size=100, gen_n_batches=10):
+def do_prior_analysis(vae_model, knn_classifier, data_X, data_y, gen_batch_size=100, gen_n_batches=10):
     vae_model.eval()
+
+    if data_X.dim() == 4:
+        data_X = data_X.reshape(-1, data_X.shape[1] * data_X.shape[2] * data_X.shape[3])
 
     with torch.no_grad():
         all_samples, all_knn_preds = [], []
@@ -102,12 +112,13 @@ def do_prior_analysis(vae_model, knn_classifier,  data_X, data_y, gen_batch_size
         all_samples = np.concatenate(all_samples, axis=0)
         all_knn_preds = np.concatenate(all_knn_preds)
 
-        print("all_samples.shape, all_knn_preds.shape", all_samples.shape, all_knn_preds.shape)
+        #         print("all_samples.shape, all_knn_preds.shape", all_samples.shape, all_knn_preds.shape)
 
-        d = dict(samples=None, data=None, metrics=None)
+        d = dict(samples=dict(), data=dict(), digit_metrics=dict())
 
         for digit in range(10):
             select_digit_data = data_X[data_y == digit]
+
             avg_data_point = select_digit_data.mean(axis=0)
             p_data_digit = len(data_X[data_y == digit]) / len(data_X)
 
@@ -141,8 +152,13 @@ def do_prior_analysis(vae_model, knn_classifier,  data_X, data_y, gen_batch_size
         return d
 
 
-def plot_prior_analysis_grid(vae_model, plot_name, plot_dir, knn_classifier, data_X, data_y,
-                             n_recon_samples=5, gen_batch_size=100, gen_n_batches=10):
+def plot_prior_analysis_grid(vae_model, data_X, data_y,
+                             knn_classifier=None, knn_classifier_path="/home/cbarkhof/fall-2021/notebooks/knnclassifier.pickle",
+                             n_recon_samples=5, gen_batch_size=100, gen_n_batches=5, plot_name=None, plot_dir=None):
+
+    if knn_classifier is None:
+        knn_classifier = pickle.load(open(knn_classifier_path, "rb"))
+
     with torch.no_grad():
         d = do_prior_analysis(vae_model, knn_classifier, data_X, data_y,
                               gen_batch_size=gen_batch_size, gen_n_batches=gen_n_batches)
@@ -152,14 +168,14 @@ def plot_prior_analysis_grid(vae_model, plot_name, plot_dir, knn_classifier, dat
         fig, axs = plt.subplots(ncols=cols, nrows=10, figsize=(cols * 1.5, 10 * 1.5))
 
         for digit in range(10):
-            # Plot average data sample belonging to this digit class
-            axs[digit, 0].imshow(d["digit_metrics"][digit]["avg_data"].reshape(28, 28), cmap="Greys")
-            axs[digit, 0].set_title(f"Avg. data digit {digit} p: {p_data:.2f}", y=1.03)
-
             # Get some stats
             p_data = d["digit_metrics"][digit]["frac_data_of_digit_class"]
             p_gen = d["digit_metrics"][digit]["frac_samples_digit_class"]
             l2 = d["digit_metrics"][digit]["l2_avg_sample_avg_data"]
+
+            # Plot average data sample belonging to this digit class
+            axs[digit, 0].imshow(d["digit_metrics"][digit]["avg_data"].reshape(28, 28), cmap="Greys")
+            axs[digit, 0].set_title(f"Avg. data digit {digit} p: {p_data:.2f}", y=1.03)
 
             # Plot some individual
             samples_class = d["samples"][digit]
@@ -178,11 +194,13 @@ def plot_prior_analysis_grid(vae_model, plot_name, plot_dir, knn_classifier, dat
             for col in range(cols):
                 axs[row, col].axis('off')
 
-        plt.suptitle(plot_name, size=14, y=0.93)
-        plt.savefig(f"{plot_dir}/prior-grid-{plot_name}.jpg", dpi=300)
-        plt.show()
+        if plot_name is not None and plot_dir is not None:
+            os.makedirs(plot_dir, exist_ok=True)
+            plt.suptitle(plot_name, size=14, y=0.93)
+            plt.savefig(f"{plot_dir}/prior-grid-{plot_name}.jpg", dpi=300)
+            plt.show()
 
-    return d
+        return d
 
 
 # Estimated generative sample class proportions
@@ -256,5 +274,47 @@ def plot_latents(encodings, clean_name, plot_N_sep_posteriors=10, plot_N_encodin
 
     if save is not None:
         plt.savefig(save, dpi=300, bbox_inches="tight")
+
+    plt.show()
+
+
+def make_c_dict(unique_vals):
+    color_dict = {'blue': '#8caadc',
+                  'red': '#c51914',
+                  'pink': '#fcb1ca',
+                  'orange': '#efb116',
+                  'dark_blue': '#000563',
+                  'green': '#005f32',
+                  'sand': '#cec3bc'}
+    colors = [c for c in list(color_dict.values())]
+    return {u: colors[i] for i, u in enumerate(unique_vals)}
+
+
+def get_wandb_runs(entity="fall-2021-vae-claartje-wilker", project="fall-2021-VAE"):
+    api = wandb.Api()
+    runs = api.runs(entity + "/" + project)
+    return runs
+
+
+def barplot_compare_across_setting(sum_stats_df, setting, metric, save_dir=None, figsize=(20, 10)):
+    sum_stats_df.sort_values(metric, inplace=True)
+
+    u_vals = sum_stats_df[setting].unique().tolist()
+    c_dict = make_c_dict(u_vals)
+
+    fig, ax = plt.subplots(figsize=figsize)
+    sum_stats_df.plot.bar(y=metric,
+                          color=[c_dict[v] for v in sum_stats_df[setting].values],
+                          ax=ax)
+
+    plt.legend(handles=[mpatches.Patch(color=c, label=u) for u, c in c_dict.items()], loc=(1.05, 0.8))
+    t = f"{metric}, coloured by {setting}"
+    plt.title(t)
+
+    plt.tight_layout()
+
+    if save_dir is not None:
+        os.makedirs(save_dir, exist_ok=True)
+        plt.savefig(f"{save_dir}/{t}.png", dpi=300, bbox_inches="tight")
 
     plt.show()
