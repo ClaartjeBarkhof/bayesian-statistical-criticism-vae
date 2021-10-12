@@ -263,7 +263,7 @@ def load_checkpoint_model_for_eval(checkpoint_path, map_location="cuda:0", retur
         args.q_z_x_type = checkpoint_path.split(" ")[3]
         args.decoder_network_type = checkpoint_path.split(" ")[6]
 
-    vae_model = VaeModel(args=args)
+    vae_model = VaeModel(args=args, device=map_location)
     vae_model.load_state_dict(checkpoint["state_dict"])
     vae_model.eval()
 

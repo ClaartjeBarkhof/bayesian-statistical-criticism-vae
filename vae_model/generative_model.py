@@ -9,6 +9,7 @@ from vae_model.made import MADE
 
 from vae_model.pixel_cnn_pp.model import PixelCNN
 
+
 class GenerativeModel(nn.Module):
     def __init__(self, args, device="cpu"):
         super(GenerativeModel, self).__init__()
@@ -47,19 +48,22 @@ class GenerativeModel(nn.Module):
         # ISOTROPIC GAUSSIAN PRIOR
         else:
             self.register_buffer("prior_z_means", torch.zeros(self.D, requires_grad=False))
-            self.register_buffer("prior_z_scales",  torch.ones(self.D, requires_grad=False))
+            self.register_buffer("prior_z_scales", torch.ones(self.D, requires_grad=False))
 
         # OUTPUT DISTRIBUTION == DATA DISTRIBUTION
         self.p_x_z_type = args.data_distribution
 
-    def sample_generative_model(self, Sx=1, Sz=1):
+    def sample_generative_model(self, Sx=1, Sz=1, return_z=False):
         # [S, 1, D]
         z_prior = self.sample_prior(S=Sz)
 
         p_x_z_prior = self.p_x_z(z_prior)
         sampled_x = p_x_z_prior.sample(sample_shape=(Sx,))
 
-        return sampled_x
+        if return_z:
+            return z_prior, sampled_x
+        else:
+            return z_prior
 
     def forward(self, z_post, x_in=None):
         """
@@ -108,6 +112,7 @@ class GenerativeModel(nn.Module):
 
         if self.decoder_network_type == "conditional_made_decoder":
             # Autoregressive distribution object
+            # the true forward is only called with log_prob
             p_x_z = self.decoder_network(z)
 
         else:
@@ -315,13 +320,13 @@ class DecoderMLPBlock(nn.Module):
 
         # Bernoulli: [S*B, image_w*image_h*C] -> [S, B, C, image_w_h, image_w_h] (5 dim)
         if self.data_distribution == "bernoulli":
-            assert pred_flat.shape == (S*B, self.C * self.image_w_h * self.image_w_h), \
+            assert pred_flat.shape == (S * B, self.C * self.image_w_h * self.image_w_h), \
                 "Expected the predictions to be of shape [B, C*W*H]"
             p_x_z_params = pred_flat.reshape(S, B, self.C, self.image_w_h, self.image_w_h)
 
         # Multinomial: [S*B, C*num_classes*W*H] -> [S, B, C, num_classes, W, H] (6 dim)
         else:
-            assert pred_flat.shape == (S*B, self.C * self.image_w_h * self.image_w_h * self.num_classes), \
+            assert pred_flat.shape == (S * B, self.C * self.image_w_h * self.image_w_h * self.num_classes), \
                 "Expected the predictions to be of shape [B, C*num_classes*W*H]"
             p_x_z_params = pred_flat.reshape(S, B, self.C, self.num_classes, self.image_w_h, self.image_w_h)
             # [S, B, C, num_classes, W, H] -> [S, B, C, W, H, num_classes]
@@ -351,29 +356,54 @@ class DecoderPixelCNNppBlock(nn.Module):
                                   resnet_nonlinearity='concat_elu', input_channels=self.C,
                                   dim_in=28, conditional=True, h_dim=self.D)
 
-
-    def forward(self, z, x_in):
+    def forward(self, z, x_in=None):
         assert z.dim() == 3, f"we assume z to be 3D, current shape {z.shape}"
         # x_in: [B, C, W, H]
         # z_post: [B, D]
 
         (S, B, D) = z.shape
-        (B, C, W, H) = x_in.shape
 
-        z_2d = z.reshape(S*B, D)
-        # in case we have a multi sample forward, we need to repeat X to match shape with z
-        x_exp_2d = x_in.repeat(S, 1, 1, 1)
 
-        # both z_2d and x_exp_2d have a sample dimension integrated in the first "batch" dimension = S*B
+        if x_in is not None:
+            (B, C, W, H) = x_in.shape
 
-        # [B*S, num_classes, W, H]
-        p_x_z_params = self.pixel_cnn(x_exp_2d, sample=False, h=z_2d)
+            z_2d = z.reshape(S * B, D)
+            # in case we have a multi sample forward, we need to repeat X to match shape with z
+            x_exp_2d = x_in.repeat(S, 1, 1, 1)
+
+            # both z_2d and x_exp_2d have a sample dimension integrated in the first "batch" dimension = S*B
+
+            # [B*S, num_classes, W, H]
+            p_x_z_params = self.pixel_cnn(x_exp_2d, sample=False, h=z_2d)
+
+            if self.data_distribution == "multinomial":
+                # [S*B, C*256, image_w_h, image_w_h] -> [S, B, C, 256, image_w_h, image_w_h] (6 dim)
+                p_x_z_params = p_x_z_params.reshape(S, B, self.C, self.num_classes, self.image_w_h, self.image_w_h)
+                # [S, B, C, num_classes, W, H] -> [S, B, C, W, H, num_classes]
+                p_x_z_params = p_x_z_params.permute(0, 1, 2, 4, 5, 3)
+            else:
+                # [S*B, C, image_w_h, image_w_h] -> [S, B, C, image_w_h, image_w_h] (5 dim)
+                p_x_z_params = p_x_z_params.reshape(S, B, self.C, self.image_w_h, self.image_w_h)
+
+        else:
+            p_x_z_params = self.auto_regressive_forward(z)
+
+        return p_x_z_params
+
+    def auto_regressive_forward(self, z):
+
+        (S, B, D) = z.shape
+        z_2d = z.reshape(S * B, D)
+
+        p_x_z_params = torch.zeros(S*B, self.C, self.image_w_h, self.image_w_h).to(z.device)
+        for i in range(self.image_w_h):
+            for j in range(self.image_w_h):
+                # pixel_cnn returns bernoulli parameters
+                out = self.pixel_cnn(p_x_z_params, sample=True, h=z_2d)
+                p_x_z_params[:, :, i, j] = out[:, :, i, j]
 
         if self.data_distribution == "multinomial":
-            # [S*B, C*256, image_w_h, image_w_h] -> [S, B, C, 256, image_w_h, image_w_h] (6 dim)
-            p_x_z_params = p_x_z_params.reshape(S, B, self.C, self.num_classes, self.image_w_h, self.image_w_h)
-            # [S, B, C, num_classes, W, H] -> [S, B, C, W, H, num_classes]
-            p_x_z_params = p_x_z_params.permute(0, 1, 2, 4, 5, 3)
+            raise NotImplementedError
         else:
             # [S*B, C, image_w_h, image_w_h] -> [S, B, C, image_w_h, image_w_h] (5 dim)
             p_x_z_params = p_x_z_params.reshape(S, B, self.C, self.image_w_h, self.image_w_h)

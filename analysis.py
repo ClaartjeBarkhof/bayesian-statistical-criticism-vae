@@ -80,10 +80,15 @@ def plot_posterior_analysis_grid(vae_model, data_X, data_y, n_sampled_reconstruc
             os.makedirs(plot_dir, exist_ok=True)
             plt.suptitle(plot_name, size=14, y=0.94)
             plt.savefig(f"{plot_dir}/{plot_name}.jpg", dpi=300)
-            plt.show()
+        plt.show()
 
 
-def do_prior_analysis(vae_model, knn_classifier, data_X, data_y, gen_batch_size=100, gen_n_batches=10):
+def do_prior_analysis(vae_model, data_X, data_y, knn_classifier=None,
+                      knn_classifier_path="/home/cbarkhof/fall-2021/notebooks/knnclassifier.pickle", gen_batch_size=100, gen_n_batches=10):
+
+    if knn_classifier is None:
+        knn_classifier = pickle.load(open(knn_classifier_path, "rb"))
+
     vae_model.eval()
 
     if data_X.dim() == 4:
@@ -197,8 +202,8 @@ def plot_prior_analysis_grid(vae_model, data_X, data_y,
         if plot_name is not None and plot_dir is not None:
             os.makedirs(plot_dir, exist_ok=True)
             plt.suptitle(plot_name, size=14, y=0.93)
-            plt.savefig(f"{plot_dir}/prior-grid-{plot_name}.jpg", dpi=300)
-            plt.show()
+            plt.savefig(f"{plot_dir}/{plot_name}.jpg", dpi=300)
+        plt.show()
 
         return d
 

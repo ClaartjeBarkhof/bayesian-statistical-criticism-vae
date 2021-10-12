@@ -22,17 +22,11 @@ from pyro import poutine
 
 from bda.probabll.bda.mmm import Family, MixedMembershipRD, Plotting
 
-random.seed(0)
-np.random.seed(0)
-pyro.set_rng_seed(0)
-torch.manual_seed(0)
-rng = np.random.RandomState(0)
-
-
-class MixedMemberShipLatentAnalysis:
-    def __init__(self, run_names, clean_names=None, data_X=None, device="cuda:0",
+class MixedMembershipLatentAnalysis:
+    def __init__(self, run_names, clean_names=None, data_X=None, device="cuda:0", seed=0, num_components=6,
                  save_encodings=True, code_dir="/home/cbarkhof/fall-2021", add_prior_group=True):
 
+        self.set_random_state(seed=seed)
         self.all_encodings = dict()
         self.device = device
 
@@ -48,7 +42,7 @@ class MixedMemberShipLatentAnalysis:
             # Load encoded data
             if os.path.isfile(enc_p):
                 # print(f"Loading encodings from {enc_p}")
-                self.all_encodings[cn] = {k: v.to(device) for k, v in torch.load(enc_p).items()}
+                self.all_encodings[cn] = {k: v.squeeze(0).to(device) for k, v in torch.load(enc_p).items()}
 
             # Encode data
             else:
@@ -75,8 +69,15 @@ class MixedMemberShipLatentAnalysis:
 
         self.all_latents = torch.stack([e["z_post"].squeeze(0) for e in self.all_encodings.values()], dim=1)
 
-        self.model = self.get_model()
+        self.model = self.get_model(num_components=num_components)
         self.posterior = None
+
+    def set_random_state(self, seed):
+        random.seed(seed)
+        np.random.seed(seed)
+        pyro.set_rng_seed(seed)
+        torch.manual_seed(seed)
+        # rng = np.random.RandomState(0)
 
     def get_model(self, num_components=10):
         model = MixedMembershipRD(
@@ -85,7 +86,7 @@ class MixedMemberShipLatentAnalysis:
                 mu_loc=0., mu_scale=10.,
                 cov_diag_alpha=0.1, cov_diag_beta=1.,
                 cov_factor_loc=0., cov_factor_scale=10.,
-                delta=False),
+                delta=True),
             T=num_components,
             DP_alpha=0.1,
             device=torch.device(self.device))
@@ -118,7 +119,7 @@ class MixedMemberShipLatentAnalysis:
         im = axs[0].imshow(omega_avg)  # , cmap=cmap
 
         axs[0].set_yticks(range(len(self.clean_names)))
-        axs[0].set_yticklabels(self.clean_names)
+        axs[0].set_yticklabels(list(self.all_encodings.keys()))
         axs[0].set_xlabel("Component i")
 
         plt.colorbar(im, cax=axs[1])
@@ -149,59 +150,65 @@ class MixedMemberShipLatentAnalysis:
         # torch.Size([1000, 1, 1, 9, 10])
         # ----------  --------------------------------
 
-        log_q_zs = []
+        log_q_zs = dict()
         for g, cn in enumerate(self.clean_names):
             # omega [S, 1, 1, G, T] -> logits [S, T]
             # batch of S mixtures all of T components
             mix = td.Categorical(logits=self.posterior["omega"][:, 0, 0, g, :])  # S, T
 
-            #print("mix.logits.shape", mix.logits.shape)
+            # print("mix.logits.shape", mix.logits.shape)
 
             # component
             mu, cov_fact, cov_diag = self.posterior["mu"].squeeze(1), self.posterior["cov_factor"].squeeze(1), self.posterior["cov_diag"].squeeze(1)
             comp = td.LowRankMultivariateNormal(loc=mu, cov_factor=cov_fact, cov_diag=cov_diag)
             batched_mixture = td.MixtureSameFamily(mix, comp)
 
-            #print("mu.shape, cov_fact.shape, cov_diag.shape", mu.shape, cov_fact.shape, cov_diag.shape)
+            # print("mu.shape, cov_fact.shape, cov_diag.shape", mu.shape, cov_fact.shape, cov_diag.shape)
 
             z_post = self.all_encodings[cn]["z_post"].unsqueeze(1)
-            #print("z_post.shape", z_post.shape)
+            # print("z_post.shape", z_post.shape)
 
             # [Sx, S_post] -> float
             log_q_z = batched_mixture.log_prob(z_post).mean()
-            log_q_zs.append(log_q_z)
-
-        log_q_zs = torch.stack(log_q_zs)
+            log_q_zs[cn] = log_q_z.item()
 
         return log_q_zs
 
     def get_log_p_z(self):
-        log_p_zs = []
+        log_p_zs = dict()
         for g, cn in enumerate(self.clean_names):
             log_p_z = td.Normal(loc=0.0, scale=1.0).log_prob(self.all_encodings[cn]["z_post"]).sum(dim=-1).mean()
-            log_p_zs.append(log_p_z)
-        log_p_zs = torch.stack(log_p_zs)
+            log_p_zs[cn] = log_p_z
         return log_p_zs
 
     def approximate_marginal_kl(self):
         log_p_zs = self.get_log_p_z()
         log_q_zs = self.approximate_log_q_z()
 
-        approx_marginal_kl = log_q_zs - log_p_zs
+        # assert log_p_zs.shape == log_q_zs, "Shape of log p z and log q z should be the same."
+
+        approx_marginal_kl = dict()
+        for cn in log_p_zs.keys():
+            approx_marginal_kl[cn] = log_q_zs[cn] - log_p_zs[cn]
 
         return approx_marginal_kl
 
     def get_mmd_encodings(self):
-        tts_mmd = []
+        tts_mmd = dict()
 
-        for e in self.all_encodings.values():
-            z_post = e["z_post"]
+        for k, e in self.all_encodings.items():
+            z_post = e["z_post"].squeeze(0)
             prior_sample = torch.randn_like(z_post)
 
             alphas = [0.1 * i for i in range(5)]  # TODO: no clue for these...
 
             n_1, n_2 = len(z_post), len(prior_sample)
-            mmd_stat = MMDStatistic(n_1, n_2)
-            tts_mmd.append(mmd_stat(z_post, prior_sample, alphas, ret_matrix=False))
 
-        return torch.FloatTensor(tts_mmd)
+            # print("n_1", n_1, "n_2", n_2)
+            # print(prior_sample.shape)
+            # print(z_post.shape)
+
+            mmd_stat = MMDStatistic(n_1, n_2)
+            tts_mmd[k] = mmd_stat(z_post, prior_sample, alphas, ret_matrix=False)
+
+        return tts_mmd

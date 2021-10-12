@@ -183,11 +183,15 @@ class Trainer:
             if epoch == self.args.max_epochs:
                 break
 
-    def test(self, batch_size=None, device="cuda:0"):
-        test_loader = self.dataset.test_loader(batch_size=batch_size)
+    def test(self, batch_size=None, device="cuda:0", loader=None, print_mean=False):
+        if loader is None:
+            loader = self.dataset.test_loader(batch_size=batch_size)
+
         results = dict()
 
-        for batch_idx, (X, y) in enumerate(test_loader):
+        for batch_idx, (X, y) in enumerate(loader):
+            print(f"{batch_idx:3d}/{len(loader)}", end="\r")
+
             loss_dict = self.validation_step(X.to(device))
 
             for k, v in loss_dict.items():
@@ -203,8 +207,9 @@ class Trainer:
                 else:
                     continue
 
-        for k, v in results.items():
-            print(k, np.mean(v))
+        if print_mean:
+            for k, v in results.items():
+                print(k, np.mean(v))
 
         return results
 
