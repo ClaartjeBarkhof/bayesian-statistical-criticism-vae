@@ -53,9 +53,9 @@ class GenerativeModel(nn.Module):
         # OUTPUT DISTRIBUTION == DATA DISTRIBUTION
         self.p_x_z_type = args.data_distribution
 
-    def sample_generative_model(self, Sx=1, Sz=1, return_z=False):
+    def sample_generative_model(self, Sx=1, Sz=1, return_z=False, device="cuda:0"):
         # [S, 1, D]
-        z_prior = self.sample_prior(S=Sz)
+        z_prior = self.sample_prior(S=Sz).to(device)
 
         p_x_z_prior = self.p_x_z(z_prior)
         sampled_x = p_x_z_prior.sample(sample_shape=(Sx,))
@@ -63,7 +63,7 @@ class GenerativeModel(nn.Module):
         if return_z:
             return z_prior, sampled_x
         else:
-            return z_prior
+            return sampled_x
 
     def forward(self, z_post, x_in=None):
         """
@@ -109,7 +109,6 @@ class GenerativeModel(nn.Module):
 
         Returns a distribution-like object with parameters [S, B, ...], reducing ... as dimensions for log_prob
         """
-
         if self.decoder_network_type == "conditional_made_decoder":
             # Autoregressive distribution object
             # the true forward is only called with log_prob
@@ -363,7 +362,7 @@ class DecoderPixelCNNppBlock(nn.Module):
 
         (S, B, D) = z.shape
 
-
+        # Teacher-forcing forward
         if x_in is not None:
             (B, C, W, H) = x_in.shape
 
@@ -385,27 +384,34 @@ class DecoderPixelCNNppBlock(nn.Module):
                 # [S*B, C, image_w_h, image_w_h] -> [S, B, C, image_w_h, image_w_h] (5 dim)
                 p_x_z_params = p_x_z_params.reshape(S, B, self.C, self.image_w_h, self.image_w_h)
 
+        # SAMPLE
         else:
             p_x_z_params = self.auto_regressive_forward(z)
 
         return p_x_z_params
 
     def auto_regressive_forward(self, z):
+        assert self.data_distribution == "bernoulli", "PixelCNN++ is only implemented for Bernoulli case now."
 
         (S, B, D) = z.shape
         z_2d = z.reshape(S * B, D)
 
         p_x_z_params = torch.zeros(S*B, self.C, self.image_w_h, self.image_w_h).to(z.device)
+        x_pred = torch.zeros(S*B, self.C, self.image_w_h, self.image_w_h).to(z.device)
+
         for i in range(self.image_w_h):
             for j in range(self.image_w_h):
-                # pixel_cnn returns bernoulli parameters
-                out = self.pixel_cnn(p_x_z_params, sample=True, h=z_2d)
-                p_x_z_params[:, :, i, j] = out[:, :, i, j]
+                print(f"{i:2d},{j:2d}", end='\r')
 
-        if self.data_distribution == "multinomial":
-            raise NotImplementedError
-        else:
-            # [S*B, C, image_w_h, image_w_h] -> [S, B, C, image_w_h, image_w_h] (5 dim)
-            p_x_z_params = p_x_z_params.reshape(S, B, self.C, self.image_w_h, self.image_w_h)
+                # pixel_cnn returns bernoulli parameters [S*B, C, W, H]
+                p_x_z_params_ij = self.pixel_cnn(x_pred, sample=True, h=z_2d)
+                x_ij = td.Bernoulli(logits=p_x_z_params_ij).sample()
+
+                x_pred[:, :, i, j] = x_ij[:, :, i, j]
+                p_x_z_params[:, :, i, j] = p_x_z_params_ij[:, :, i, j]
+
+        # [S*B, C, image_w_h, image_w_h] -> [S, B, C, image_w_h, image_w_h] (5 dim)
+        p_x_z_params = p_x_z_params.reshape(S, B, self.C, self.image_w_h, self.image_w_h)
+        x_pred = x_pred.reshape(S, B, self.C, self.image_w_h, self.image_w_h)
 
         return p_x_z_params

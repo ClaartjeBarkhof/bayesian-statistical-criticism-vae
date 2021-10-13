@@ -1,8 +1,6 @@
 import os
 import random
 import numpy as np
-import matplotlib.pyplot as plt
-import arviz
 from utils import load_checkpoint_model_for_eval
 from analysis import collect_encodings
 from matplotlib import pyplot as plt
@@ -10,17 +8,10 @@ from torch_two_sample import MMDStatistic
 
 import torch
 import torch.distributions as td
-import torch.nn.functional as F
-
-from tqdm.auto import tqdm
-from tabulate import tabulate
-from collections import OrderedDict, namedtuple
 
 import pyro
-import pyro.distributions as pd
-from pyro import poutine
 
-from bda.probabll.bda.mmm import Family, MixedMembershipRD, Plotting
+from analysis.bda.probabll.bda import Family, MixedMembershipRD, Plotting
 
 class MixedMembershipLatentAnalysis:
     def __init__(self, run_names, clean_names=None, data_X=None, device="cuda:0", seed=0, num_components=6,

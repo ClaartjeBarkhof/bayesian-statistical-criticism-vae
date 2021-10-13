@@ -1,50 +1,17 @@
-import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
+import matplotlib.pyplot as plt
 import torch
 import os
 import pickle
-from arguments import prepare_parser
-from dataset_dataloader import ImageDataset
-from vae_model.distributions import AutoRegressiveDistribution
 import numpy as np
 import scipy.stats
 from scipy.stats import chisquare
-import wandb
+
+import analysis_utils
 
 
-def collect_encodings(vae_model, data_X, Sz=1):
-    with torch.no_grad():
-        q_z_x, z_post = vae_model.inf_model(data_X[:, :, :, :], n_samples=Sz)
-
-        if isinstance(q_z_x, AutoRegressiveDistribution):
-            (mean, scale) = q_z_x.params
-            mean, scale = mean[0, :, :], scale[0, :, :]
-        else:
-            mean, scale = q_z_x.base_dist.loc, q_z_x.base_dist.scale
-
-        return dict(z_post=z_post, mean_post=mean, scale_post=scale)
-
-
-def get_n_data_samples_x_y(image_dataset_name="bmnist", N_samples=500):
-    args = prepare_parser(jupyter=True, print_settings=False)
-    args.image_dataset_name = image_dataset_name
-    dataset = ImageDataset(args=args)
-
-    data_X, data_y = [], []
-
-    # [B, C, W, H] [B]
-    for i, (X, y) in enumerate(dataset.valid_loader(num_workers=1, batch_size=100, shuffle=True)):
-        data_X.append(X)
-        data_y.append(y)
-
-        if (i + 1) * 100 >= N_samples:
-            break
-
-    data_X, data_y = torch.cat(data_X, dim=0), torch.cat(data_y, dim=0)
-
-    return data_X[:N_samples], data_y[:N_samples]
-
-
+# --------------------------------------------------------------------------------------
+# Posterior
 def plot_posterior_analysis_grid(vae_model, data_X, data_y, n_sampled_reconstructions=5, plot_name=None, plot_dir=None):
     with torch.no_grad():
 
@@ -83,9 +50,66 @@ def plot_posterior_analysis_grid(vae_model, data_X, data_y, n_sampled_reconstruc
         plt.show()
 
 
-def do_prior_analysis(vae_model, data_X, data_y, knn_classifier=None,
-                      knn_classifier_path="/home/cbarkhof/fall-2021/notebooks/knnclassifier.pickle", gen_batch_size=100, gen_n_batches=10):
+# --------------------------------------------------------------------------------------
+# Latent space
+def plot_latents(encodings, clean_name, plot_N_sep_posteriors=10, plot_N_encodings=200, save=None):
+    x = np.linspace(-4, 4, 500)
+    y = scipy.stats.norm.pdf(x, 0, 1)
 
+    # [S, B, D] -> [B, D]
+    latents = encodings["z_post"][0, :plot_N_encodings, :].cpu().numpy()
+
+    mean = encodings["mean_post"][:plot_N_encodings, :].cpu().numpy()
+    mean_mean = mean.mean(axis=0)
+    std = encodings["scale_post"][:plot_N_encodings, :].cpu().numpy()
+    std_mean = std.mean(axis=0)
+
+    plot_N_dims = 10
+    fig, axs = plt.subplots(nrows=1, ncols=plot_N_dims, figsize=(plot_N_dims * 2, 8))
+
+    dims = list(np.arange(plot_N_dims))
+
+    for i, d in enumerate(dims):
+        # print(f"{i}/9", end='\r')
+        axs[i].grid(b=False, which="both")
+
+        if i > 0:
+            axs[i].set_yticks([])
+
+        # axs[i].grid = False
+        axs[i].set_xticks([])
+        axs[i].hist(latents[:, d], orientation="horizontal", bins=50, density=True, alpha=0.3,
+                    label=f"Latent sample histogram\n(N={plot_N_encodings})")
+        axs[i].set_ylim([-4, 4])
+
+        for n in range(plot_N_sep_posteriors):
+            choice_int = np.random.randint(0, len(latents))
+
+            y_sep_post_i = scipy.stats.norm.pdf(x, mean[choice_int, d], std[choice_int, d])
+
+            label = "$q(z|x_i)$ for randomly chosen $i$" if n == 0 else None
+
+            axs[i].plot(y_sep_post_i, x, color='blue', linewidth=1, label=label, alpha=0.1)
+
+        axs[i].axhline(color='b', linewidth=1)  # xmin=0, xmax=50,
+        axs[i].plot(y, x, color='r', linewidth=1, label="Standard Gaussian")
+        axs[i].set_title(f"$\mu$ = {mean_mean[d]:.2f}\n $\sigma^2$ = {std_mean[d]:.2f}", size=7, y=1.03)
+
+    axs[-1].legend(loc=(0.0, 1.1), prop={'family': 'serif', 'weight': 300, 'size': 14})
+
+    fig.suptitle(clean_name, size=16, y=1.04)
+
+    if save is not None:
+        plt.savefig(save, dpi=300, bbox_inches="tight")
+
+    plt.show()
+
+
+# --------------------------------------------------------------------------------------
+# Generative model & prior
+def do_prior_analysis(vae_model, data_X, data_y, knn_classifier=None,
+                      knn_classifier_path="/home/cbarkhof/fall-2021/notebooks/knnclassifier.pickle", gen_batch_size=100,
+                      gen_n_batches=10):
     if knn_classifier is None:
         knn_classifier = pickle.load(open(knn_classifier_path, "rb"))
 
@@ -158,9 +182,9 @@ def do_prior_analysis(vae_model, data_X, data_y, knn_classifier=None,
 
 
 def plot_prior_analysis_grid(vae_model, data_X, data_y,
-                             knn_classifier=None, knn_classifier_path="/home/cbarkhof/fall-2021/notebooks/knnclassifier.pickle",
+                             knn_classifier=None,
+                             knn_classifier_path="/home/cbarkhof/fall-2021/notebooks/knnclassifier.pickle",
                              n_recon_samples=5, gen_batch_size=100, gen_n_batches=5, plot_name=None, plot_dir=None):
-
     if knn_classifier is None:
         knn_classifier = pickle.load(open(knn_classifier_path, "rb"))
 
@@ -208,7 +232,6 @@ def plot_prior_analysis_grid(vae_model, data_X, data_y,
         return d
 
 
-# Estimated generative sample class proportions
 def plot_gen_sample_class_proportions(vae_model, knn_classifier, n_gen_samples, plot_name, plot_dir):
     with torch.no_grad():
         # [Sx=1, Sz=n_gen_samples, B=1, C, W, H] -> [n_generative_samples, C, W, H]
@@ -230,82 +253,13 @@ def plot_gen_sample_class_proportions(vae_model, knn_classifier, n_gen_samples, 
         plt.show()
 
 
-def plot_latents(encodings, clean_name, plot_N_sep_posteriors=10, plot_N_encodings=200, save=None):
-    x = np.linspace(-4, 4, 500)
-    y = scipy.stats.norm.pdf(x, 0, 1)
-
-    # [S, B, D] -> [B, D]
-    latents = encodings["z_post"][0, :plot_N_encodings, :].cpu().numpy()
-
-    mean = encodings["mean_post"][:plot_N_encodings, :].cpu().numpy()
-    mean_mean = mean.mean(axis=0)
-    std = encodings["scale_post"][:plot_N_encodings, :].cpu().numpy()
-    std_mean = std.mean(axis=0)
-
-    plot_N_dims = 10
-    fig, axs = plt.subplots(nrows=1, ncols=plot_N_dims, figsize=(plot_N_dims * 2, 8))
-
-    dims = list(np.arange(plot_N_dims))
-
-    for i, d in enumerate(dims):
-        # print(f"{i}/9", end='\r')
-        axs[i].grid(b=False, which="both")
-
-        if i > 0:
-            axs[i].set_yticks([])
-
-        # axs[i].grid = False
-        axs[i].set_xticks([])
-        axs[i].hist(latents[:, d], orientation="horizontal", bins=50, density=True, alpha=0.3,
-                    label=f"Latent sample histogram\n(N={plot_N_encodings})")
-        axs[i].set_ylim([-4, 4])
-
-        for n in range(plot_N_sep_posteriors):
-            choice_int = np.random.randint(0, len(latents))
-
-            y_sep_post_i = scipy.stats.norm.pdf(x, mean[choice_int, d], std[choice_int, d])
-
-            label = "$q(z|x_i)$ for randomly chosen $i$" if n == 0 else None
-
-            axs[i].plot(y_sep_post_i, x, color='blue', linewidth=1, label=label, alpha=0.1)
-
-        axs[i].axhline(color='b', linewidth=1)  # xmin=0, xmax=50,
-        axs[i].plot(y, x, color='r', linewidth=1, label="Standard Gaussian")
-        axs[i].set_title(f"$\mu$ = {mean_mean[d]:.2f}\n $\sigma^2$ = {std_mean[d]:.2f}", size=7, y=1.03)
-
-    axs[-1].legend(loc=(0.0, 1.1), prop={'family': 'serif', 'weight': 300, 'size': 14})
-
-    fig.suptitle(clean_name, size=16, y=1.04)
-
-    if save is not None:
-        plt.savefig(save, dpi=300, bbox_inches="tight")
-
-    plt.show()
-
-
-def make_c_dict(unique_vals):
-    color_dict = {'blue': '#8caadc',
-                  'red': '#c51914',
-                  'pink': '#fcb1ca',
-                  'orange': '#efb116',
-                  'dark_blue': '#000563',
-                  'green': '#005f32',
-                  'sand': '#cec3bc'}
-    colors = [c for c in list(color_dict.values())]
-    return {u: colors[i] for i, u in enumerate(unique_vals)}
-
-
-def get_wandb_runs(entity="fall-2021-vae-claartje-wilker", project="fall-2021-VAE"):
-    api = wandb.Api()
-    runs = api.runs(entity + "/" + project)
-    return runs
-
-
+# --------------------------------------------------------------------------------------
+# Summary result plots
 def barplot_compare_across_setting(sum_stats_df, setting, metric, save_dir=None, figsize=(20, 10)):
     sum_stats_df.sort_values(metric, inplace=True)
 
     u_vals = sum_stats_df[setting].unique().tolist()
-    c_dict = make_c_dict(u_vals)
+    c_dict = analysis_utils.make_c_dict(u_vals)
 
     fig, ax = plt.subplots(figsize=figsize)
     sum_stats_df.plot.bar(y=metric,
