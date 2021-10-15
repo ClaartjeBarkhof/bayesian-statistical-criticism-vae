@@ -17,7 +17,7 @@ class Trainer:
         self.device = device
         self.args = args
         self.dataset = dataset
-        self.data_loaders = dataset.get_train_validation_loaders()
+        self.data_loaders = dataset.get_train_validation_loaders() if dataset is not None else None
         self.vae_model = vae_model
         self.objective = Objective(args=args, device=self.device)  # this holds the constraint as well
         self.optimisers = self.get_optimisers()

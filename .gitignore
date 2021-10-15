@@ -142,3 +142,4 @@ check_inference_model.ipynb
 /jobs/
 /notebooks/
 /analysis/analysis-files/
+*.sbatch

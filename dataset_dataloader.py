@@ -128,9 +128,10 @@ class ImageDataset:
             # self.test_set = data_utils.TensorDataset(torch.from_numpy(x_test).reshape(len(x_test), 1, 28, 28).float(),
             #                                          torch.from_numpy(y_test))
 
-    def train_loader(self, shuffle=True, batch_size=None):
+    def train_loader(self, shuffle=True, batch_size=None, num_workers=None):
         train_loader = DataLoader(self.train_set, batch_size=self.batch_size if batch_size is None else batch_size,
-                                  shuffle=shuffle, num_workers=self.num_workers)
+                                  shuffle=shuffle,
+                                  num_workers=self.num_workers if num_workers is None else num_workers)
         return train_loader
 
     def valid_loader(self, num_workers=None, batch_size=None, shuffle=False):
@@ -139,10 +140,11 @@ class ImageDataset:
                                   num_workers=self.num_workers if num_workers is None else num_workers)
         return valid_loader
 
-    def test_loader(self, batch_size=None, shuffle=False):
+    def test_loader(self, batch_size=None, shuffle=False, num_workers=None):
         test_loader = DataLoader(self.test_set,
                                  batch_size=self.batch_size if batch_size is None else batch_size,
-                                 shuffle=shuffle, num_workers=self.num_workers)
+                                 shuffle=shuffle,
+                                 num_workers=self.num_workers if num_workers is None else num_workers)
         return test_loader
 
     def get_train_validation_loaders(self):

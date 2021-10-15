@@ -32,15 +32,20 @@ def make_c_dict(unique_vals):
 
 # --------------------------------------------------------------------------------------
 # Data
-def get_n_data_samples_x_y(image_dataset_name="bmnist", N_samples=500):
+def get_n_data_samples_x_y(image_dataset_name="bmnist", N_samples=500, validation=True):
     args = prepare_parser(jupyter=True, print_settings=False)
     args.image_dataset_name = image_dataset_name
     dataset = ImageDataset(args=args)
 
     data_X, data_y = [], []
 
+    if validation:
+        loader = dataset.valid_loader(num_workers=1, batch_size=100, shuffle=True)
+    else:
+        loader = dataset.test_loader(num_workers=1, batch_size=100, shuffle=True)
+
     # [B, C, W, H] [B]
-    for i, (X, y) in enumerate(dataset.valid_loader(num_workers=1, batch_size=100, shuffle=True)):
+    for i, (X, y) in enumerate(loader):
         data_X.append(X)
         data_y.append(y)
 

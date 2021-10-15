@@ -56,9 +56,15 @@ class GenerativeModel(nn.Module):
     def sample_generative_model(self, Sx=1, Sz=1, return_z=False, device="cuda:0"):
         # [S, 1, D]
         z_prior = self.sample_prior(S=Sz).to(device)
+        p_x_z = self.p_x_z(z_prior)
 
-        p_x_z_prior = self.p_x_z(z_prior)
-        sampled_x = p_x_z_prior.sample(sample_shape=(Sx,))
+        # Because of its autoregressiveness, it is better to do it this way
+        # a bit of a hack: make some sort of autoregressive distribution here as well
+        if self.decoder_network_type == "cond_pixel_cnn_pp":
+            sampled_x = self.decoder_network.sample
+
+        else:
+            sampled_x = p_x_z.sample(sample_shape=(Sx,))
 
         if return_z:
             return z_prior, sampled_x
@@ -355,6 +361,8 @@ class DecoderPixelCNNppBlock(nn.Module):
                                   resnet_nonlinearity='concat_elu', input_channels=self.C,
                                   dim_in=28, conditional=True, h_dim=self.D)
 
+        self.sample = None
+
     def forward(self, z, x_in=None):
         assert z.dim() == 3, f"we assume z to be 3D, current shape {z.shape}"
         # x_in: [B, C, W, H]
@@ -413,5 +421,6 @@ class DecoderPixelCNNppBlock(nn.Module):
         # [S*B, C, image_w_h, image_w_h] -> [S, B, C, image_w_h, image_w_h] (5 dim)
         p_x_z_params = p_x_z_params.reshape(S, B, self.C, self.image_w_h, self.image_w_h)
         x_pred = x_pred.reshape(S, B, self.C, self.image_w_h, self.image_w_h)
+        self.sample = x_pred
 
         return p_x_z_params
