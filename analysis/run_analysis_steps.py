@@ -21,7 +21,20 @@ ANALYSIS_DIR = f"{CODE_DIR}/analysis/analysis-files"
 CHECKPOINT_DIR = f"{CODE_DIR}/run_files/checkpoints"
 
 ENCODE_RECONSTUCT_FILE = f"encode-reconstruct-test-valid.pt"
-SAMPLE_FILE = f"samples.pt"
+SAMPLE_FILE = f"generative-samples.pt"
+
+SURPRISAL_RECONSTRUCT_FILE = "surprisal_reconstruct.pt"
+SURPRISAL_SAMPLE_FILE = "surprisal_sample.pt"
+SURPRISAL_DATA_FILE = "surprisal_data.pt"
+
+TEST_VALID_EVAL_FILE = "test-valid-results.pt"
+
+KNN_PREDICT_SAMPLES_FILE = "knn-preds-generative-samples.pickle"
+KNN_PREDICT_RECONSTRUCTIONS_FILE = "knn-preds-reconstructions.pickle"
+
+KNN_PREDICT_STATS_FILE = "knn-preds-stats.pickle"
+
+DATA_SPACE_STATS = "data_space_stats.pickle"
 
 N_SAMPLE_BATCHES = 5
 SAMPLE_BATCH_SIZE = 250

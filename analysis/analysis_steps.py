@@ -31,7 +31,9 @@ pd.options.display.float_format = '{:.6f}'.format
 import wandb
 
 import matplotlib.pyplot as plt
-import seaborn as sns; sns.set()
+import seaborn as sns;
+
+sns.set()
 import matplotlib.patches as mpatches
 from adjustText import adjust_text
 
@@ -399,9 +401,9 @@ def gather_surprisal_stats(device="cuda:0", include_train=True, batch_size_surpr
             continue
 
         print(i, run_name)
-        if "pixel" in run_name.lower():
-            print("Skipping pixel cnn models for now.")
-            continue
+        # if "pixel" in run_name.lower():
+        #     print("Skipping pixel cnn models for now.")
+        #     continue
 
         save_dir = f"{ANALYSIS_DIR}/{run_name}"
         os.makedirs(save_dir, exist_ok=True)
@@ -569,15 +571,15 @@ class Net(nn.Module):
 def knn_predictions_for_samples_reconstructions(batch_size=100,
                                                 knn_mimicker_path="/home/cbarkhof/fall-2021/notebooks/KNN_mimicking_network.pt",
                                                 knn_path=None, device="cuda:0"):
+    assert knn_path is not None or knn_mimicker_path is not None, "knn_predictions_for_samples_reconstructions: " \
+                                                                  "Either provide knn_path or knn_mimicker_path "
     knn_mimicker = False
     if knn_mimicker_path is not None:
         knn_mimicker = True
         knn = Net()
         knn.load_state_dict(torch.load(knn_mimicker_path))
-    elif knn_path is not None:
-        knn = pickle.load(open(knn_path, "rb"))
     else:
-        print("Either provide knn_path or knn_mimicker_path")
+        knn = pickle.load(open(knn_path, "rb"))
 
     for i, run_name in enumerate(os.listdir(ANALYSIS_DIR)):
         if os.path.isfile(f"{ANALYSIS_DIR}/{run_name}"):
@@ -609,7 +611,7 @@ def knn_predictions_for_samples_reconstructions(batch_size=100,
         assert os.path.isfile(recon_file), "no reconstructions for this model, run encode_reconstruct_sample"
         recons = torch.load(recon_file)
         preds = dict()
-        for phase in ["test", "valid"]:
+        for phase in ["train", "test", "valid"]:
             r = recons[phase]["reconstruct"]
             loader = DataLoader(TensorDataset(r), batch_size=batch_size)
             preds[phase] = make_knn_predictions(knn, loader, knn_mimicker=knn_mimicker, device=device)
@@ -617,15 +619,61 @@ def knn_predictions_for_samples_reconstructions(batch_size=100,
         pickle.dump(preds, open(knn_recon_save_file, "wb"))
 
 
+def make_knn_predictions_data():
+    from dataset_dataloader import ImageDataset
+    from arguments import prepare_parser
+    import pickle
+
+    args = prepare_parser(jupyter=True, print_settings=False)
+    args.batch_size = 200
+    args.num_workers = 3
+
+    dataset = ImageDataset(args=args)
+
+    knn_mimicker = Net()
+    knn_mimicker_path = "/home/cbarkhof/fall-2021/notebooks/KNN_mimicking_network.pt"
+    knn_mimicker.load_state_dict(torch.load(knn_mimicker_path))
+    knn_mimicker.to("cuda:0")
+
+    r = dict()
+
+    for phase in ["train", "valid", "test"]:
+        print(phase)
+
+        if phase == "train":
+            loader = dataset.train_loader(shuffle=False)
+        elif phase == "valid":
+            loader = dataset.valid_loader(shuffle=False)
+        else:
+            loader = dataset.test_loader(shuffle=False)
+
+        probas = []
+        for batch in loader:
+            with torch.no_grad():
+                x = batch[0].to("cuda:0")
+                probas.append(knn_mimicker.predict_proba(x).cpu())
+        probas = torch.cat(probas, dim=0)
+        marg = probas.mean(dim=0)
+        preds = torch.argmax(probas, dim=-1)
+
+        r[phase] = dict(proba=probas, marg=marg, preds=preds)
+
+    path = "/home/cbarkhof/fall-2021/analysis/analysis-files/KNN_data_probas.p"
+    pickle.dump(r, open(path, "wb"))
+
+
 def knn_prediction_distribution_stats(
         knn_data_pred_path="/home/cbarkhof/fall-2021/analysis/analysis-files/KNN_data_probas.p"):
     knn_data_pred = pickle.load(open(knn_data_pred_path, "rb"))
 
+    print("TEST", knn_data_pred.keys())
+
     uniform = td.Categorical(probs=torch.FloatTensor([0.1 for _ in range(10)]))
     marg_test_data = td.Categorical(probs=torch.FloatTensor(knn_data_pred["test"]["marg"]))
     marg_valid_data = td.Categorical(probs=torch.FloatTensor(knn_data_pred["valid"]["marg"]))
+    marg_train_data = td.Categorical(probs=torch.FloatTensor(knn_data_pred["train"]["marg"]))
 
-    marginals_data = dict(test=marg_test_data, valid=marg_valid_data)
+    marginals_data = dict(test=marg_test_data, valid=marg_valid_data, train=marg_train_data)
 
     for i, run_name in enumerate(os.listdir(ANALYSIS_DIR)):
         if os.path.isfile(f"{ANALYSIS_DIR}/{run_name}"):
@@ -643,9 +691,9 @@ def knn_prediction_distribution_stats(
 
         knn_preds_stats_file = f"{save_dir}/{KNN_PREDICT_STATS_FILE}"
 
-        if os.path.isfile(knn_preds_stats_file):
-            print("Did this one already, skipping!")
-            continue
+        # if os.path.isfile(knn_preds_stats_file):
+        #     print("Did this one already, skipping!")
+        #     continue
 
         res = dict()
 
@@ -662,22 +710,28 @@ def knn_prediction_distribution_stats(
                 marginal_pred = td.Categorical(probs=torch.FloatTensor(knn_preds_samples["marg"]))
 
             # KL [ p(y|z) | p(y) ]
-            kl_instance_marg_pred = td.kl_divergence(instance_dists, marginal_pred).mean().item()
-            kl_marg_uniform = td.kl_divergence(marginal_pred, uniform).mean().item()
+            kl_instance_marg_pred = td.kl_divergence(instance_dists, marginal_pred)  # .mean().item()
+            kl_instance_marg_pred_mean = kl_instance_marg_pred.mean().item()
+            kl_marg_uniform = td.kl_divergence(marginal_pred, uniform)  # .mean().item()
+            kl_marg_uniform_mean = kl_marg_uniform.mean().item()
 
-            res[phase] = dict(kl_instance_marg_pred=kl_instance_marg_pred,
-                              kl_marg_uniform=kl_marg_uniform)
+            res[phase] = dict(kl_instance_marg_pred=kl_instance_marg_pred.tolist(),
+                              kl_instance_marg_pred_mean=kl_instance_marg_pred_mean,
+                              kl_marg_uniform=kl_marg_uniform.tolist(),
+                              kl_marg_uniform_mean=kl_marg_uniform_mean)
 
             if phase != "samples":
-                kl_marg_marg_data = td.kl_divergence(marginal_pred, marginals_data[phase]).mean().item()
-                res[phase]["kl_marg_marg_data"] = kl_marg_marg_data
+                kl_marg_marg_data = td.kl_divergence(marginal_pred, marginals_data[phase])  # .mean().item()
+                kl_marg_marg_data_mean = kl_marg_marg_data.mean().item()
+                res[phase]["kl_marg_marg_data"] = kl_marg_marg_data.tolist()
+                res[phase]["kl_marg_marg_data_mean"] = kl_marg_marg_data_mean
 
         print("Saving KNN stats!")
         pickle.dump(res, open(knn_preds_stats_file, "wb"))
 
 
 def data_space_stats():
-    data_X, data_y = get_n_data_samples_x_y(image_dataset_name="bmnist", N_samples=1000, validation=True)
+    val_data_X, val_data_y = get_n_data_samples_x_y(image_dataset_name="bmnist", N_samples=1000, validation=True)
     uniform = td.Categorical(probs=torch.FloatTensor([0.1 for _ in range(10)]))
 
     for i, run_name in enumerate(os.listdir(ANALYSIS_DIR)):
@@ -696,75 +750,94 @@ def data_space_stats():
             print("No KNN predictions yet. Run knn_predictions_for_samples_reconstructions")
             continue
 
-        # knn_preds_recon = pickle.load(open(f"{save_dir}/{KNN_PREDICT_RECONSTRUCTIONS_FILE}", "rb"))
         knn_preds_samples = pickle.load(open(f"{save_dir}/{KNN_PREDICT_SAMPLES_FILE}", "rb"))
+        knn_preds_recons = pickle.load(open(f"{save_dir}/{KNN_PREDICT_RECONSTRUCTIONS_FILE}", "rb"))
 
-        # encode_reconstruct_file = torch.load(f"{save_dir}/{ENCODE_RECONSTUCT_FILE}")
+        encode_reconstruct = torch.load(f"{save_dir}/{ENCODE_RECONSTUCT_FILE}")
         samples = torch.load(f"{save_dir}/{SAMPLE_FILE}")
 
-        #print(knn_preds_samples["preds"].shape)
-        #print(samples["x"].shape)
+        data = {'samples': samples, **encode_reconstruct}
+        knn_preds = {"samples": knn_preds_samples, **knn_preds_recons}
 
-        preds = knn_preds_samples["preds"]
-        x = samples["x"]
+        all_results = dict()
 
-        res = dict()
-        L_0 = torch.flatten(x, start_dim=1).mean(dim=-1).mean().item()
+        for phase in ["train", "valid", "test", "samples"]:
 
-        fracs = []
-        data_fracs = []
-        L2s = []
+            if phase != "samples":
+                x = data[phase]["reconstruct"]
+            else:
+                x = data[phase]['x']
 
-        data_x_i_avgs = []
-        x_i_avgs = []
+            preds = knn_preds[phase]["preds"]
+            assert len(preds) == len(x), "the predictions and samples are expected to be of the same length"
 
-        assert len(preds) == len(x), "the predictions and samples are expected to be of the same length"
+            res = dict()
 
-        for i in range(10):
-            x_i = torch.flatten(x[preds == i], start_dim=1)
-            data_x_i = torch.flatten(data_X[data_y == i], start_dim=1)
+            fracs = []
+            data_fracs = []
+            L2_all_classes = []
+            L0_all_classes = []
+            L2_all_data = []
 
-            y_i = data_y[data_y == i]
+            data_x_i_avgs = []
+            x_i_avgs = []
 
-            frac_i = len(x_i) / len(x)
-            data_frac_i = len(y_i) / len(data_y)
+            L0_all = torch.flatten(x, start_dim=1).sum(dim=-1)
 
-            data_x_i_avg = torch.mean(data_x_i, dim=0)
-            x_i_avg = torch.mean(x_i, dim=0)
+            for i in range(10):
+                x_i = torch.flatten(x[preds == i], start_dim=1)
+                val_data_x_i = torch.flatten(val_data_X[val_data_y == i], start_dim=1)
 
-            # print(data_x_i_avg.shape, x_i_avg.shape)
-            assert data_x_i_avg.shape == x_i_avg.shape, "avg data sample and avg sample must have same size to compare"
+                val_data_y_i = val_data_y[val_data_y == i]
 
-            data_x_i_avgs.append(data_x_i_avg)
-            x_i_avgs.append(x_i_avg)
+                pred_frac_i = len(x_i) / len(x)
+                val_data_frac_i = len(val_data_y_i) / len(val_data_y)
 
-            L2_avg = ((data_x_i_avg - x_i_avg) ** 2).mean()
-            L2s.append(L2_avg)
+                val_data_x_i_avg = torch.mean(val_data_x_i, dim=0)
+                x_i_avg = torch.mean(x_i, dim=0)
 
-            fracs.append(frac_i)
-            data_fracs.append(data_frac_i)
+                assert val_data_x_i_avg.shape == x_i_avg.shape, "avg data sample and avg sample must have same size " \
+                                                                "to compare "
 
-        sample_dist = td.Categorical(probs=torch.FloatTensor(fracs))
-        data_dist = td.Categorical(probs=torch.FloatTensor(data_fracs))
+                data_x_i_avgs.append(val_data_x_i_avg)
+                x_i_avgs.append(x_i_avg)
 
-        kl_div_sample_dist_from_uniform = td.kl_divergence(sample_dist, uniform).item()
-        kl_div_sample_dist_from_data_dist = td.kl_divergence(sample_dist, data_dist).item()
+                L0_i = x_i.sum(-1).mean()
+                L0_all_classes.append(L0_i.item())
 
-        res["L_0_sample_avg"] = L_0
-        res["KL_marg_sample_dist_data_dist"] = kl_div_sample_dist_from_data_dist
-        res["KL_marg_sample_dist_uniform"] = kl_div_sample_dist_from_uniform
-        res["marg_sample_dist"] = sample_dist
-        res["avg_class_L2"] = np.mean(L2s)
-        res["class_L2s"] = L2s
-        res["class_fracs"] = fracs
-        res["data_class_fracs"] = data_fracs
-        res["data_x_i_avgs"] = data_x_i_avgs
-        res["x_i_avgs"] = x_i_avgs
+                L2 = ((x_i - val_data_x_i_avg) ** 2).sum(dim=-1)
+                L2_all_data.append(L2)
+                L2_all_classes.append(L2.mean().item())
+
+                fracs.append(pred_frac_i)
+                data_fracs.append(val_data_frac_i)
+
+            L2_all_data = torch.cat(L2_all_data, dim=0)
+
+            sample_dist = td.Categorical(probs=torch.FloatTensor(fracs))
+            data_dist = td.Categorical(probs=torch.FloatTensor(data_fracs))
+
+            kl_div_sample_dist_from_uniform = td.kl_divergence(sample_dist, uniform).item()
+            kl_div_sample_dist_from_data_dist = td.kl_divergence(sample_dist, data_dist).item()
+
+            res["L0_avg"] = L0_all.mean().item()
+            res["L0_all"] = L0_all.tolist()
+            res["L0_avg_per_class"] = L0_all_classes
+
+            res["L2_avg"] = np.mean(L2_all_classes)
+            res["L2_avg_per_class"] = L2_all_classes
+            res["L2_all"] = L2_all_data.tolist()
+
+            res["KL_marg_sample_dist_data_dist"] = kl_div_sample_dist_from_data_dist
+            res["KL_marg_sample_dist_uniform"] = kl_div_sample_dist_from_uniform
+            res["marg_sample_dist"] = sample_dist
+
+            res["class_fracs"] = fracs
+            res["data_class_fracs"] = data_fracs
+            res["data_x_i_avgs"] = data_x_i_avgs
+            res["x_i_avgs"] = x_i_avgs
+
+            all_results[phase] = res
 
         print("Saving data space stats!")
-        pickle.dump(res, open(save_file, "wb"))
-
-
-
-
-
+        pickle.dump(all_results, open(save_file, "wb"))

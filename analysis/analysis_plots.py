@@ -7,7 +7,7 @@ import numpy as np
 import scipy.stats
 from scipy.stats import chisquare
 
-import analysis_utils
+from . import analysis_utils
 
 
 # --------------------------------------------------------------------------------------
