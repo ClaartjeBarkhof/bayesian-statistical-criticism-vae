@@ -1,14 +1,18 @@
 import matplotlib.pyplot as plt
-import seaborn as sns; sns.set()
+import seaborn as sns;
+
+sns.set()
 import arviz as az
 
 from tabulate import tabulate
 import numpy as np
+import pandas as pd
 
 import numpyro
 from numpyro.infer import MCMC, NUTS, Predictive
 import numpyro.distributions as dist
 from jax import random
+import jax.numpy as jnp
 
 NUM_CHAINS = 3
 numpyro.set_host_device_count(NUM_CHAINS)
@@ -29,6 +33,14 @@ class NumpyroGLM:
         self.num_warmup = num_warmup
 
         self.obs_dist = obs_dist
+
+        self.var_names = ["global_bias", "group_bias", "weights"]
+
+        if self.obs_dist == "student_t":
+            self.var_names += ["student_scale", "student_df"]
+        elif self.obs_dist == "log_normal":
+            self.var_names += ["l_normal_scale"]
+
         self.correlate_predictors = correlate_predictors
 
         self.obs_x_list = obs_x_list
@@ -64,22 +76,73 @@ class NumpyroGLM:
 
         self.print_init()
 
-    def plot_hist_predictors(self):
-        fig, axs = plt.subplots(nrows=2, ncols=len(self.obs_x_list), figsize=(len(self.obs_x_list) * 4, 8))
+    def model(self, obs_x=None, obs_g=None, obs_y=None):
+        # GLOBAL BIAS
+        global_bias = numpyro.sample(
+            "global_bias",
+            dist.Laplace(
+                np.zeros(1),
+                np.ones(1) / 2.
+            )
+        )
 
-        for w, var_name in enumerate(self.obs_x_list):
-            axs[0, w].hist(self.df[var_name].values.tolist(), density=True, bins=40, lw=0)
-            axs[0, w].set_title(f"{var_name}")
+        # PREDICTOR WEIGHTS
+        if obs_x is None:
+            Wx_b = 0.0
+        else:
+            with numpyro.plate("groups", self.G):
+                group_bias = numpyro.sample(
+                    "group_bias",
+                    dist.Laplace(
+                        0.0,
+                        1. / 2.
+                    )
+                )
+                if self.correlate_predictors:
+                    weights = numpyro.sample(
+                        "weights",
+                        dist.MultivariateNormal(
+                            loc=np.zeros(self.D),
+                            covariance_matrix=np.diag(np.ones(self.D)) / 2.
+                        )
+                    )
+                else:
+                    weights = numpyro.sample(
+                        "weights",
+                        dist.Laplace(
+                            np.zeros(self.D),
+                            np.ones(self.D)
+                        ).to_event(1)
+                    )
 
-        for w, var_name in enumerate(self.obs_x_list):
-            for g, gn in enumerate(self.group_names):
-                axs[1, w].hist(self.df[self.df["group_id"] == g][var_name].values.tolist(),
-                               density=True, bins=40, lw=0, label=gn)
-                axs[1, w].set_title(f"{var_name}")
+                if self.obs_dist == "log_normal" or self.obs_dist == "normal":
+                    l_normal_scale = numpyro.sample("l_normal_scale", dist.Uniform(low=0.1, high=10.0))
+                elif self.obs_dist == "student_t":
+                    # See section 15.2 of https://jrnold.github.io/bayesian_notes/robust-regression.html:
+                    student_scale = numpyro.sample("student_scale", dist.Gamma(concentration=2.0, rate=0.1))
+                    student_df = numpyro.sample("student_df", dist.Exponential(rate=1.0 / 10.0))
+                else:
+                    l_normal_scale, student_scale, student_df = 0.0, 0.0, 0.0
 
-        plt.legend()
-        plt.tight_layout()
-        plt.show()
+            # [G, D]*[N, D] + [N] -> [N, D]*[N, D] + [N] -> [N]
+            obs_x = (obs_x - obs_x.mean(axis=0, keepdims=True)) / obs_x.std(axis=0, keepdims=True)
+            Wx_b = (weights[self.obs_g] * obs_x).sum(-1) + group_bias[self.obs_g]
+
+        # [N]
+        eta = numpyro.deterministic("eta", (global_bias + Wx_b))
+
+        with numpyro.plate("data", self.N):
+            if self.obs_dist == "binomial":
+                dist_y = dist.Binomial(self.total_count, logits=eta)
+            elif self.obs_dist == "student_t":
+                dist_y = dist.StudentT(df=student_df[self.obs_g], loc=eta, scale=student_scale[self.obs_g])
+            elif self.obs_dist == "log_normal":
+                dist_y = dist.LogNormal(loc=eta, scale=l_normal_scale[self.obs_g])
+            elif self.obs_dist == "normal":
+                dist_y = dist.Normal(loc=eta, scale=l_normal_scale[self.obs_g])
+
+            numpyro.sample("obs", dist_y, obs=obs_y)
+
 
     def plot_correlations(self):
         cols = [self.obs_y_name] + self.obs_x_list + ["group_name"]
@@ -87,9 +150,11 @@ class NumpyroGLM:
         plt.tight_layout()
         plt.show()
 
+
     def print_init(self):
         predictors = " & ".join(self.obs_x_list)
         print(f"Predictor X columns: {predictors}")
+        print(f"Correlate predictors: {self.correlate_predictors}")
         print(f"Predicting y, column: {self.obs_y_name}")
         print(f"Groups (G={len(self.group_name_df)}):")
         display(self.group_name_df)
@@ -107,68 +172,10 @@ class NumpyroGLM:
                    self.obs_x_list), "the predictor variable names must be columns of the DF"
         assert self.obs_y_name in self.df.columns, "the target variable y must be a column of the DF"
         assert self.obs_g_name in self.df.columns, "the group_id variable must be a column of the DF"
-        valid_dists = ["binomial", "student_t"]
+        valid_dists = ["binomial", "student_t", "log_normal", "normal"]
         assert self.obs_dist in valid_dists, f"the observation distribution must be in {valid_dists}"
         assert "group_id" in self.group_name_df.columns, "expects a column group_id in self.group_name_df"
         assert "group_name" in self.group_name_df.columns, "expects a column group_id in self.group_name_df"
-
-    def model(self, obs_x=None, obs_g=None, obs_y=None):
-        # GLOBAL BIAS
-        global_bias = numpyro.sample(
-            "global_bias",
-            dist.Normal(
-                np.zeros(1),
-                np.ones(1)
-            )
-        )
-
-        # GROUP BIAS
-        if obs_g is None:
-            group_bias_ = 0.0
-        else:
-            group_bias = numpyro.sample(
-                "group_bias",
-                dist.Normal(
-                    np.zeros(self.G),
-                    np.ones(self.G)
-                ).to_event(1)
-            )
-            group_bias_ = group_bias[obs_g]
-
-        # PREDICTOR WEIGHTS
-        if obs_x is None:
-            Wx = 0.0
-        else:
-            # improvement: MVN (predictors do correlate)
-            weights = numpyro.sample(
-                "weights",
-                dist.Normal(
-                    np.zeros(self.D),
-                    np.ones(self.D)
-                ).to_event(1)
-            )
-
-            Wx = (weights * obs_x).sum(-1)
-
-        # [N]
-        eta = numpyro.deterministic("eta", global_bias + group_bias_ + Wx)
-
-        # Section 15.2 of https://jrnold.github.io/bayesian_notes/robust-regression.html:
-        # A reasonable prior distribution for the degrees of freedom parameter is a Gamma
-        # distribution with shape parameter 2, and an inverse-scale (rate) parameter of 0.1
-        if self.obs_dist == "student_t":
-            student_scale = numpyro.sample("student_scale", dist.Gamma(concentration=2.0, rate=0.1))
-        else:
-            student_scale = 0.0
-        # student_scale = 1.0
-
-        with numpyro.plate("data", self.N):
-            if self.obs_dist == "binomial":
-                dist_y = dist.Binomial(self.total_count, logits=eta)
-            elif self.obs_dist == "student_t":
-                dist_y = dist.StudentT(df=4, loc=eta, scale=student_scale)
-
-            numpyro.sample("obs", dist_y, obs=obs_y)
 
     def run(self):
         self.mcmc.run(self.rng_key, obs_x=self.obs_x, obs_g=self.obs_g, obs_y=self.obs_y)
@@ -187,25 +194,102 @@ class NumpyroGLM:
             self.prior_predictive = Predictive(self.model, num_samples=num_prior_samples)
 
         # [num_prior_samples, N]: for every x take multiple prior samples
-        self.prior_predictions = self.prior_predictive(rng_key_, obs_x=self.obs_x, obs_g=self.obs_g, obs_y=None)["obs"]
-        print("prior_predictions shape (n_prior_samples, N):", self.prior_predictions.shape)
+        self.prior_predictions = self.prior_predictive(rng_key_, obs_x=self.obs_x, obs_g=self.obs_g, obs_y=None)
 
         if plot:
-            self.plot_prior_predictions()
+            self.plot_trace_predictions(full=True, prior=True)
 
         return self.prior_predictions
 
-    def plot_prior_predictions(self):
-        if self.prior_predictions is None:
-            self.get_prior_predictions()
+    def plot_trace_predictions(self, full=True, prior=True):
+        if prior:
+            print(f"Plotting prior prediction, full={full}")
+            if self.prior_predictions is None:
+                self.get_prior_predictions()
+            predictions = self.prior_predictions
+        else:
+            print(f"Plotting posterior predictions, full={full}")
+            if self.posterior_predictions is None:
+                self.get_posterior_predictions()
+            predictions = {**self.posterior_predictions, **self.posterior_samples}
 
-        prior_preds_avg_over_sample = self.prior_predictions.mean(axis=0)
-        plt.hist(prior_preds_avg_over_sample, bins=40, density=True, label="prior predictive", alpha=0.7, lw=0)
-        plt.hist(self.obs_y, bins=40, density=True, label="y obs", alpha=0.7, lw=0)
-        plt.title(f"Prior predictions")
-        plt.legend()
-        plt.tight_layout()
-        plt.show()
+        print("plot_trace_predictions: keys shapes of predictions")
+        for k, v in predictions.items():
+            print(k, v.shape)
+
+        for var in ["obs", "eta", "global_bias"]:
+            if not full and var != "obs":
+                continue
+
+            fig, ax = plt.subplots(figsize=(8, 4))
+
+            label = f"{var}" if var != "obs" else "pred"
+
+            sns.histplot(x=np.array(predictions[var]).flatten(), ax=ax, label=label, kde=True, stat="density",)
+            if var == "obs":
+                # ax.hist(np.array(predictions[var]).flatten(), bins=40, density=True, label=label, alpha=0.7, lw=0)
+                # ax.hist(np.array(self.obs_y), bins=40, density=True,label="obs y", alpha=0.7, lw=0)
+
+                sns.histplot(x=np.array(self.obs_y), ax=ax, label="obs y", kde=True, stat="density", color="red")
+            # else:
+                # az.plot_dist(np.array(predictions[var]).flatten(), ax=ax,
+                #              plot_kwargs=dict(alpha=0.7, lw=0))
+
+                # sns.kdeplot(y=np.array(predictions[var]).flatten(), ax=ax, label=label)
+
+            ax.set_title(f"{var}")
+
+            plt.legend()
+            plt.tight_layout()
+
+            plt.show()
+
+        if full:
+            # Group variables
+            for var in ["group_bias", "l_normal_scale", "student_scale", "student_df"]:
+                if ("student" in var) and ("student" not in self.obs_dist):
+                    continue
+                if ("normal" in var) and ("normal" not in self.obs_dist):
+                    continue
+
+                fig, axs = plt.subplots(ncols=self.G, figsize=(int(4*self.G), 4))
+
+                for g in range(self.G):
+                    # axs[g].hist(np.array(predictions[var][:, g]).flatten(), bins=40, density=True,
+                    #             label=f"{var}", alpha=0.7, lw=0)
+
+                    # az.plot_dist(np.array(predictions[var][:, g]).flatten(), ax=axs[g],
+                    #              plot_kwargs=dict(alpha=0.7, lw=0))
+
+                    sns.histplot(x=np.array(predictions[var][:, g]).flatten(), ax=axs[g], kde=True, stat="density")
+
+                    axs[g].set_title(f"{self.group_names[g]}")
+
+                plt.suptitle(var)
+                plt.legend()
+                plt.tight_layout()
+
+                plt.show()
+
+            # Group + predictor weights
+            fig, axs = plt.subplots(ncols=self.D, nrows=self.G, figsize=(int(4 * self.G), 4))
+
+            for row in range(self.G):
+                for col in range(self.D):
+                    # axs[row, col].hist(np.array(predictions["weights"][:, row, col]).flatten(), bins=40, density=True,
+                    #                    alpha=0.7, lw=0)
+
+                    # az.plot_dist(np.array(predictions["weights"][:, row, col]).flatten(), ax=axs[row, col],
+                    #              plot_kwargs=dict(alpha=0.7, lw=0))
+
+                    sns.histplot(x=np.array(predictions["weights"][:, row, col]).flatten(), ax=axs[row, col],
+                                 kde=True, stat="density",)
+
+                    axs[row, col].set_title(f"G={self.group_names[row]}\nD={self.obs_x_list[col]}", y=1.02)
+
+            plt.suptitle("weights linear")
+            plt.tight_layout()
+            plt.show()
 
     def get_posterior_predictions(self, plot=False):
         self.run_check()
@@ -214,51 +298,24 @@ class NumpyroGLM:
         if self.posterior_predictive is None:
             self.posterior_predictive = Predictive(self.model, self.posterior_samples)
 
-        # [num_chains * num_samples, N] -> [num_chains, num_samples, N]
-        self.posterior_predictions = self.posterior_predictive(rng_key_, obs_x=self.obs_x, obs_g=self.obs_g)["obs"]
-
-        print("posterior_predictions shape (chains, n_samples, N):", self.posterior_predictions.shape)
+        self.posterior_predictions = self.posterior_predictive(rng_key_, obs_x=self.obs_x, obs_g=self.obs_g)
 
         if plot:
-            self.plot_posterior_predictions()
+            self.plot_trace_predictions(full=True, prior=False)
 
         return self.posterior_predictions
-
-    def plot_posterior_predictions(self):
-        if self.posterior_predictions is None:
-            self.get_posterior_predictions()
-
-        fig, axs = plt.subplots(ncols=self.num_chains, figsize=(14, 4))
-
-        posterior_predictions = self.posterior_predictions.reshape(self.num_chains, self.num_samples, -1)
-        # [num_chains, num_samples, N] -> [num_chains, N]
-        posterior_predictions_avg_over_sample = posterior_predictions.mean(axis=1)
-
-        if self.num_chains > 1:
-            for i in range(self.num_chains):
-                axs[i].hist(self.obs_y, bins=40, density=True, label="y obs", alpha=0.7, lw=0)
-                axs[i].hist(posterior_predictions_avg_over_sample[i, :], bins=40, density=True,
-                            label="posterior predictive", alpha=0.7, lw=0)
-                axs[i].set_title(f"Posterior predictive (Chain {i})")
-        else:
-            axs.hist(self.obs_y, bins=40, density=True, label="y obs", alpha=0.7, lw=0)
-            axs.hist(posterior_predictions_avg_over_sample[0, :], bins=40, density=True,
-                     label="posterior predictive", alpha=0.7, lw=0)
-            axs.set_title(f"Posterior predictive (Chain 0)")
-
-        plt.legend()
-        plt.tight_layout()
-        plt.show()
 
     def predictive_checks(self, prior=False):
         if prior:
             if self.prior_predictions is None:
                 self.get_prior_predictions()
-            preds = self.prior_predictions
+            preds = self.prior_predictions["obs"]
         else:
             if self.posterior_predictions is None:
                 self.get_posterior_predictions()
-            preds = self.posterior_predictions.reshape(-1, self.posterior_predictions.shape[-1])
+            preds = self.posterior_predictions["obs"].reshape(-1, self.posterior_predictions["obs"].shape[-1])
+
+        # print("predictive checks shape preds:", preds.shape)
 
         # SHAPES:
         # posterior_predictions [N_chains*N_samples, N_data]
@@ -309,10 +366,12 @@ class NumpyroGLM:
 
         for i, (s, o, p, pm) in enumerate(zip(stats, obs_stats, preds_stats, preds_stats_means)):
             r, c = i // ncols, i % ncols
-            if np.any(np.isinf(p)):
-                print(f"inf encountered in preds of {s}")
+            if np.any(np.isinf(p)) or np.any(np.isnan(p)):
+                print(f"encountered NAN in preds of {s} = {np.any(np.isnan(p))}")
+                print(f"encountered INF in preds of {s} = {np.any(np.isinf(p))}")
                 continue
-            axs[r, c].hist(p, bins=40, lw=0, density=True)
+
+            axs[r, c].hist(np.array(p), bins=40, lw=0, density=True)
             axs[r, c].axvline(o, color='g', linestyle='dashed', label='obs')
             axs[r, c].axvline(pm, color='r', linestyle='dashed', label='pred mean T')
             axs[r, c].set_title(s)
@@ -324,10 +383,11 @@ class NumpyroGLM:
         plt.show()
 
     def plot_ppc(self, num_pp_samples=10):
+        self.plot_check()
         if self.posterior_predictions is None:
             self.get_posterior_predictions()
         if "posterior_predictive" not in self.arviz_data.groups():
-            a = self.posterior_predictions.reshape(-1, self.posterior_predictions.shape[-1])
+            a = self.posterior_predictions["obs"].reshape(-1, self.posterior_predictions["obs"].shape[-1])
             self.arviz_data.add_groups(az.from_numpyro(posterior_predictive={"obs": a}, num_chains=self.num_chains))
         az.plot_ppc(self.arviz_data, num_pp_samples=num_pp_samples)
 
@@ -338,37 +398,55 @@ class NumpyroGLM:
     def plot_check(self):
         self.run_check()
         if self.arviz_data is None:
-            # coords={"school": np.arange(eight_school_data["J"])},
-            # dims={"theta": ["school"]}
-            # self.group_names
-            # self.obs_x_list
-            #             coords = {"group": np.arange(len(self.group_names)), "predictor": np.arange(len(self.obs_x_list))}
-            coords = {"group": self.group_names, "predictor": self.obs_x_list}
-            dims = {"group_bias": ["group"], "weights": ["predictor"]}
-            self.arviz_data = az.from_numpyro(posterior=self.mcmc, num_chains=self.num_chains, dims=dims, coords=coords)
+            l = []
+            for g in self.group_names:
+                l1 = []
+                for x in self.obs_x_list:
+                    l1.append(f"{g}-{x}")
+                l.append(l1)
+
+            #coords = {"group": self.group_names, "group-predictor": l}
+            #dims = {"group_bias": ["group"], "weights": ["group-predictor"]}
+            #, dims=dims, coords=coords
+            self.arviz_data = az.from_numpyro(posterior=self.mcmc, num_chains=self.num_chains)
 
     def plot_trace(self):
         self.plot_check()
         # coords={"group_bias": self.group_names, "weights": self.obs_x_list}
-        az.plot_trace(self.arviz_data, var_names=["global_bias", "group_bias", "weights"], compact=False)
+        az.plot_trace(self.arviz_data, var_names=self.var_names, compact=False)
+
+    def plot_weights_correlation(self):
+        df = pd.DataFrame(np.array(self.posterior_samples['weights']), columns=self.obs_x_list)
+        _ = pd.plotting.scatter_matrix(df, alpha=0.2, figsize=(12, 12))
+        plt.show()
 
     def plot_posterior(self):
         self.plot_check()
-        az.plot_posterior(self.arviz_data, var_names=["global_bias", "group_bias", "weights"])
+        az.plot_posterior(self.arviz_data, var_names=self.var_names)
 
     def plot_group_bias(self):
         self.plot_check()
         az.plot_forest(self.arviz_data, kind='forestplot', var_names=["group_bias"])
 
-    def full_analysis(self, num_pp_samples=400, num_prior_samples=1000):
-        self.plot_hist_predictors()
-        self.plot_correlations()
+    def full_analysis(self, num_pp_samples=400, num_prior_samples=1000, data_plots=True,
+                      prior_plots=True, posterior_plots=True, arviz_plots=True):
+        if data_plots:
+            self.plot_correlations()
+
+        if prior_plots:
+            _ = self.get_prior_predictions(num_prior_samples=num_prior_samples, plot=True)
+            self.predictive_checks(prior=True)
+
         self.run()
-        _ = self.get_prior_predictions(num_prior_samples=num_prior_samples, plot=True)
-        self.predictive_checks(prior=True)
-        _ = self.get_posterior_predictions(plot=True)
-        self.predictive_checks(prior=False)
-        self.plot_trace()
-        self.plot_ppc(num_pp_samples=num_pp_samples)
-        self.plot_posterior()
-        self.plot_group_bias()
+
+        if posterior_plots:
+            _ = self.get_posterior_predictions(plot=True)
+            self.predictive_checks(prior=False)
+
+        if arviz_plots:
+            # self.plot_trace()
+            self.plot_ppc(num_pp_samples=num_pp_samples)
+            self.plot_posterior()
+            if self.correlate_predictors:
+                self.plot_weights_correlation()
+            self.plot_group_bias()
