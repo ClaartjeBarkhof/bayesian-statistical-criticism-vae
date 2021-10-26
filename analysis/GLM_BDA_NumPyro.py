@@ -19,10 +19,9 @@ numpyro.set_host_device_count(NUM_CHAINS)
 
 print(f"Running on NumPryo v{numpyro.__version__}")
 
-
 class NumpyroGLM:
     def __init__(self, df, group_name_df, obs_x_list, obs_g_name, obs_y_name, correlate_predictors=False,
-                 obs_dist="binomial", num_samples=1000, num_warmup=1000, num_chains=3):
+                 obs_dist="binomial", num_samples=1000, num_warmup=1000, num_chains=3, inverse_data_transform=None):
         self.df = df
 
         self.group_name_df = group_name_df
@@ -31,6 +30,8 @@ class NumpyroGLM:
         self.num_samples = num_samples
         self.num_chains = num_chains
         self.num_warmup = num_warmup
+
+        self.inverse_data_transform = inverse_data_transform
 
         self.obs_dist = obs_dist
 
@@ -143,13 +144,11 @@ class NumpyroGLM:
 
             numpyro.sample("obs", dist_y, obs=obs_y)
 
-
     def plot_correlations(self):
         cols = [self.obs_y_name] + self.obs_x_list + ["group_name"]
         sns.pairplot(self.df[cols], hue="group_name")
         plt.tight_layout()
         plt.show()
-
 
     def print_init(self):
         predictors = " & ".join(self.obs_x_list)
@@ -202,6 +201,7 @@ class NumpyroGLM:
         return self.prior_predictions
 
     def plot_trace_predictions(self, full=True, prior=True):
+        posterior_prior = "Prior" if prior else "Posterior"
         if prior:
             print(f"Plotting prior prediction, full={full}")
             if self.prior_predictions is None:
@@ -225,19 +225,11 @@ class NumpyroGLM:
 
             label = f"{var}" if var != "obs" else "pred"
 
-            sns.histplot(x=np.array(predictions[var]).flatten(), ax=ax, label=label, kde=True, stat="density",)
+            _ = ax.hist(np.array(predictions[var]).flatten(), label=label, density=True, bins=40, lw=0, alpha=0.7)
             if var == "obs":
-                # ax.hist(np.array(predictions[var]).flatten(), bins=40, density=True, label=label, alpha=0.7, lw=0)
-                # ax.hist(np.array(self.obs_y), bins=40, density=True,label="obs y", alpha=0.7, lw=0)
+                _ = ax.hist(np.array(self.obs_y), label="obs y", density=True, bins=40, lw=0, alpha=0.7)
 
-                sns.histplot(x=np.array(self.obs_y), ax=ax, label="obs y", kde=True, stat="density", color="red")
-            # else:
-                # az.plot_dist(np.array(predictions[var]).flatten(), ax=ax,
-                #              plot_kwargs=dict(alpha=0.7, lw=0))
-
-                # sns.kdeplot(y=np.array(predictions[var]).flatten(), ax=ax, label=label)
-
-            ax.set_title(f"{var}")
+            ax.set_title(f"{posterior_prior} - {var}")
 
             plt.legend()
             plt.tight_layout()
@@ -255,39 +247,27 @@ class NumpyroGLM:
                 fig, axs = plt.subplots(ncols=self.G, figsize=(int(4*self.G), 4))
 
                 for g in range(self.G):
-                    # axs[g].hist(np.array(predictions[var][:, g]).flatten(), bins=40, density=True,
-                    #             label=f"{var}", alpha=0.7, lw=0)
 
-                    # az.plot_dist(np.array(predictions[var][:, g]).flatten(), ax=axs[g],
-                    #              plot_kwargs=dict(alpha=0.7, lw=0))
-
-                    sns.histplot(x=np.array(predictions[var][:, g]).flatten(), ax=axs[g], kde=True, stat="density")
-
+                    axs[g].hist(np.array(predictions[var][:, g]).flatten(), density=True, bins=40, lw=0, alpha=0.7)
                     axs[g].set_title(f"{self.group_names[g]}")
 
-                plt.suptitle(var)
-                plt.legend()
+                plt.suptitle(f"{posterior_prior} - {var}")
+                # plt.legend()
                 plt.tight_layout()
 
                 plt.show()
 
             # Group + predictor weights
-            fig, axs = plt.subplots(ncols=self.D, nrows=self.G, figsize=(int(4 * self.G), 4))
+            fig, axs = plt.subplots(ncols=self.D, nrows=self.G, figsize=(int(4 * self.D), int(self.G*4)))
 
             for row in range(self.G):
                 for col in range(self.D):
-                    # axs[row, col].hist(np.array(predictions["weights"][:, row, col]).flatten(), bins=40, density=True,
-                    #                    alpha=0.7, lw=0)
 
-                    # az.plot_dist(np.array(predictions["weights"][:, row, col]).flatten(), ax=axs[row, col],
-                    #              plot_kwargs=dict(alpha=0.7, lw=0))
-
-                    sns.histplot(x=np.array(predictions["weights"][:, row, col]).flatten(), ax=axs[row, col],
-                                 kde=True, stat="density",)
+                    axs[row, col].hist(np.array(predictions["weights"][:, row, col]).flatten(), density=True, bins=40, lw=0, alpha=0.7)
 
                     axs[row, col].set_title(f"G={self.group_names[row]}\nD={self.obs_x_list[col]}", y=1.02)
 
-            plt.suptitle("weights linear")
+            plt.suptitle(f"{posterior_prior} - weights linear")
             plt.tight_layout()
             plt.show()
 
@@ -309,11 +289,13 @@ class NumpyroGLM:
         if prior:
             if self.prior_predictions is None:
                 self.get_prior_predictions()
-            preds = self.prior_predictions["obs"]
+            preds = np.array(self.prior_predictions["obs"])
         else:
             if self.posterior_predictions is None:
                 self.get_posterior_predictions()
-            preds = self.posterior_predictions["obs"].reshape(-1, self.posterior_predictions["obs"].shape[-1])
+            preds = np.array(self.posterior_predictions["obs"]) #.reshape(-1, self.posterior_predictions["obs"].shape[-1])
+            preds = preds.reshape(self.num_chains, self.num_samples, self.N)
+            preds = preds[0, :, :]  # only consider the first chain, to make plotting less heavy
 
         # print("predictive checks shape preds:", preds.shape)
 
@@ -410,6 +392,67 @@ class NumpyroGLM:
             #, dims=dims, coords=coords
             self.arviz_data = az.from_numpyro(posterior=self.mcmc, num_chains=self.num_chains)
 
+    def plot_post_preds_per_group(self, N_cols=2):
+        if self.posterior_predictions is None:
+            self.get_posterior_predictions()
+
+        # [N_chains * N_samples, N_data]
+        predictions = self.posterior_predictions["obs"]
+        if self.inverse_data_transform is not None:
+            predictions = self.inverse_data_transform(np.array(predictions))
+            obs_y = self.inverse_data_transform(np.array(self.obs_y))
+        else:
+            predictions = np.array(predictions)
+            obs_y = np.array(self.obs_y)
+
+        predictions = predictions.reshape(self.num_chains, self.num_samples, -1)[0, :, :]
+
+        N_plots = self.G
+        N_rows = int(np.ceil(N_plots / N_cols))
+
+        color_dict = {'blue': '#8caadc',
+                      'red': '#c51914',
+                      'pink': '#fcb1ca',
+                      'orange': '#efb116',
+                      'dark_blue': '#000563',
+                      'green': '#005f32',
+                      'sand': '#cec3bc'}
+        colors = list(color_dict.values())
+
+        # make grid spec grid
+        fig = plt.figure(figsize=(4 * N_cols, 4 * N_rows + 1))
+        gs = fig.add_gridspec(N_rows + 1, N_cols)
+        all_ax = fig.add_subplot(gs[0, :])
+        g_axs = []
+        for row in range(N_rows):
+            for col in range(N_cols):
+                g_axs.append(fig.add_subplot(gs[row + 1, col]))
+
+        all_ax.hist(predictions.flatten(), color=colors[1], density=True, bins=40, label=f"Preds", lw=0,
+                    alpha=0.7)
+        all_ax.hist(obs_y.flatten(), color=colors[2], density=True, bins=40, label=f"Data", lw=0,
+                    alpha=0.7)
+        all_ax.legend()
+
+        for g in range(self.G):
+            preds_g = predictions[:, self.obs_g == g].flatten()
+            obs_y_g = obs_y[self.obs_g == g].flatten()
+
+            #         sns.histplot(x=preds_g, ax=g_axs, label=f"G={g}", kde=True, stat="density", color=colors[g])
+            #         sns.histplot(x=, ax=ax,
+            #                      label="Data", kde=True, stat="density", color=colors[g+1])
+
+            g_axs[g].hist(preds_g, color=colors[1], density=True, bins=40, label=f"Preds", lw=0, alpha=0.7)
+            g_axs[g].hist(obs_y_g, color=colors[2], density=True, bins=40, label=f"Data", lw=0, alpha=0.7)
+            g_axs[g].set_title(self.group_names[g])
+
+        plt.suptitle(f"Posterior predictions versus observations (per group)\n"
+                     f"y var: {self.obs_y_name}, inv trans: {str(self.inverse_data_transform)}", y=1.03)
+
+        plt.tight_layout()
+
+        plt.show()
+
     def plot_trace(self):
         self.plot_check()
         # coords={"group_bias": self.group_names, "weights": self.obs_x_list}
@@ -442,6 +485,7 @@ class NumpyroGLM:
         if posterior_plots:
             _ = self.get_posterior_predictions(plot=True)
             self.predictive_checks(prior=False)
+            self.plot_post_preds_per_group(N_cols=2)
 
         if arviz_plots:
             # self.plot_trace()
