@@ -116,7 +116,7 @@ class NumpyroGLM:
                         ).to_event(1)
                     )
 
-                if self.obs_dist == "log_normal" or self.obs_dist == "normal":
+                if self.obs_dist == "log_normal" or self.obs_dist == "normal" or self.obs_dist == "truncated_normal":
                     l_normal_scale = numpyro.sample("l_normal_scale", dist.Uniform(low=0.1, high=10.0))
                 elif self.obs_dist == "student_t":
                     # See section 15.2 of https://jrnold.github.io/bayesian_notes/robust-regression.html:
@@ -141,6 +141,8 @@ class NumpyroGLM:
                 dist_y = dist.LogNormal(loc=eta, scale=l_normal_scale[self.obs_g])
             elif self.obs_dist == "normal":
                 dist_y = dist.Normal(loc=eta, scale=l_normal_scale[self.obs_g])
+            elif self.obs_dist == "truncated_normal":
+                dist_y = dist.TruncatedNormal(low=0.0, loc=eta, scale=l_normal_scale[self.obs_g])
 
             numpyro.sample("obs", dist_y, obs=obs_y)
 
@@ -171,7 +173,7 @@ class NumpyroGLM:
                    self.obs_x_list), "the predictor variable names must be columns of the DF"
         assert self.obs_y_name in self.df.columns, "the target variable y must be a column of the DF"
         assert self.obs_g_name in self.df.columns, "the group_id variable must be a column of the DF"
-        valid_dists = ["binomial", "student_t", "log_normal", "normal"]
+        valid_dists = ["binomial", "student_t", "log_normal", "normal", "truncated_normal"]
         assert self.obs_dist in valid_dists, f"the observation distribution must be in {valid_dists}"
         assert "group_id" in self.group_name_df.columns, "expects a column group_id in self.group_name_df"
         assert "group_name" in self.group_name_df.columns, "expects a column group_id in self.group_name_df"
@@ -225,9 +227,11 @@ class NumpyroGLM:
 
             label = f"{var}" if var != "obs" else "pred"
 
-            _ = ax.hist(np.array(predictions[var]).flatten(), label=label, density=True, bins=40, lw=0, alpha=0.7)
+            if not (np.any(np.isinf(np.array(predictions[var]).flatten())) or np.any(np.isnan(np.array(predictions[var]).flatten()))):
+                _ = ax.hist(np.array(predictions[var]).flatten(), label=label, density=True, bins=40, lw=0, alpha=0.7)
             if var == "obs":
-                _ = ax.hist(np.array(self.obs_y), label="obs y", density=True, bins=40, lw=0, alpha=0.7)
+                if not (np.any(np.isinf(np.array(self.obs_y))) or np.any(np.isnan(np.array(self.obs_y)))):
+                    _ = ax.hist(np.array(self.obs_y), label="obs y", density=True, bins=40, lw=0, alpha=0.7)
 
             ax.set_title(f"{posterior_prior} - {var}")
 
@@ -247,8 +251,9 @@ class NumpyroGLM:
                 fig, axs = plt.subplots(ncols=self.G, figsize=(int(4*self.G), 4))
 
                 for g in range(self.G):
-
-                    axs[g].hist(np.array(predictions[var][:, g]).flatten(), density=True, bins=40, lw=0, alpha=0.7)
+                    if not (np.any(np.isinf(np.array(predictions[var][:, g]).flatten())) or np.any(
+                            np.isnan(np.array(np.array(predictions[var][:, g]).flatten())))):
+                        axs[g].hist(np.array(predictions[var][:, g]).flatten(), density=True, bins=40, lw=0, alpha=0.7)
                     axs[g].set_title(f"{self.group_names[g]}")
 
                 plt.suptitle(f"{posterior_prior} - {var}")
@@ -258,13 +263,14 @@ class NumpyroGLM:
                 plt.show()
 
             # Group + predictor weights
-            fig, axs = plt.subplots(ncols=self.D, nrows=self.G, figsize=(int(4 * self.D), int(self.G*4)))
+            fig, axs = plt.subplots(ncols=self.D, nrows=self.G, figsize=(int(4 * self.D), int(self.G*4)),
+                                    sharex="all", sharey="all")
 
             for row in range(self.G):
                 for col in range(self.D):
-
-                    axs[row, col].hist(np.array(predictions["weights"][:, row, col]).flatten(), density=True, bins=40, lw=0, alpha=0.7)
-
+                    if not (np.any(np.isinf(np.array(predictions["weights"][:, row, col]).flatten())) or np.any(
+                            np.isnan(np.array(np.array(predictions["weights"][:, row, col]).flatten())))):
+                        axs[row, col].hist(np.array(predictions["weights"][:, row, col]).flatten(), density=True, bins=40, lw=0, alpha=0.7)
                     axs[row, col].set_title(f"G={self.group_names[row]}\nD={self.obs_x_list[col]}", y=1.02)
 
             plt.suptitle(f"{posterior_prior} - weights linear")
@@ -428,9 +434,12 @@ class NumpyroGLM:
             for col in range(N_cols):
                 g_axs.append(fig.add_subplot(gs[row + 1, col]))
 
-        all_ax.hist(predictions.flatten(), color=colors[1], density=True, bins=40, label=f"Preds", lw=0,
-                    alpha=0.7)
-        all_ax.hist(obs_y.flatten(), color=colors[2], density=True, bins=40, label=f"Data", lw=0,
+        if not (np.any(np.isinf(predictions.flatten())) or np.any(np.isnan(predictions.flatten()))):
+            all_ax.hist(predictions.flatten(), color=colors[1], density=True, bins=40, label=f"Preds", lw=0,
+                        alpha=0.7)
+
+        if not (np.any(np.isinf(obs_y.flatten())) or np.any(np.isnan(obs_y.flatten()))):
+            all_ax.hist(obs_y.flatten(), color=colors[2], density=True, bins=40, label=f"Data", lw=0,
                     alpha=0.7)
         all_ax.legend()
 
@@ -438,12 +447,15 @@ class NumpyroGLM:
             preds_g = predictions[:, self.obs_g == g].flatten()
             obs_y_g = obs_y[self.obs_g == g].flatten()
 
+            if not (np.any(np.isinf(preds_g)) or np.any(np.isnan(preds_g))):
+                g_axs[g].hist(preds_g, color=colors[1], density=True, bins=40, label=f"Preds", lw=0, alpha=0.7)
             #         sns.histplot(x=preds_g, ax=g_axs, label=f"G={g}", kde=True, stat="density", color=colors[g])
             #         sns.histplot(x=, ax=ax,
             #                      label="Data", kde=True, stat="density", color=colors[g+1])
 
-            g_axs[g].hist(preds_g, color=colors[1], density=True, bins=40, label=f"Preds", lw=0, alpha=0.7)
-            g_axs[g].hist(obs_y_g, color=colors[2], density=True, bins=40, label=f"Data", lw=0, alpha=0.7)
+            if not (np.any(np.isinf(obs_y_g)) or np.any(np.isnan(obs_y_g))):
+                g_axs[g].hist(obs_y_g, color=colors[2], density=True, bins=40, label=f"Data", lw=0, alpha=0.7)
+
             g_axs[g].set_title(self.group_names[g])
 
         plt.suptitle(f"Posterior predictions versus observations (per group)\n"
