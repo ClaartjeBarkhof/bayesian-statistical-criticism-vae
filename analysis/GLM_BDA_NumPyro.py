@@ -14,6 +14,9 @@ import numpyro.distributions as dist
 from jax import random
 import jax.numpy as jnp
 
+from numpyro.diagnostics import hpdi
+from scipy import stats
+
 NUM_CHAINS = 3
 numpyro.set_host_device_count(NUM_CHAINS)
 
@@ -483,8 +486,204 @@ class NumpyroGLM:
         self.plot_check()
         az.plot_forest(self.arviz_data, kind='forestplot', var_names=["group_bias"])
 
-    def full_analysis(self, num_pp_samples=400, num_prior_samples=1000, data_plots=True,
-                      prior_plots=True, posterior_plots=True, arviz_plots=True):
+    def plot_group_specific_params(self, predictor_col="mmd mean"):
+        assert predictor_col in self.obs_x_list, f"{predictor_col} must be one of the predictors"
+        mmd_col = self.obs_x_list.index(predictor_col)
+
+        weights = self.posterior_samples["weights"][:, :, mmd_col]
+        global_bias = self.posterior_samples["global_bias"]
+        group_bias = self.posterior_samples["group_bias"]
+
+        if self.obs_dist == "student_t":
+            group_student_df = self.posterior_samples["student_df"]
+            group_student_scale = self.posterior_samples["student_scale"]
+            dist_stats = [group_student_df, group_student_scale]
+            dist_stat_names = ["group_student_df", "group_student_scale"]
+        elif "normal" in self.obs_dist:
+            group_scale = self.posterior_samples["l_normal_scale"]
+            dist_stats = [group_scale]
+            dist_stat_names = ["group_normal_scale"]
+
+        stat_list = [weights, group_bias] + dist_stats
+        stat_list_names = ["MMD weights", "group_bias"] + dist_stat_names
+
+        ncols = len(stat_list)
+
+        fig, axs = plt.subplots(nrows=self.G, ncols=ncols, figsize=(16, 16), sharex="col")
+
+        for g in range(self.G):
+            row = g
+            for col, stat in enumerate(stat_list):
+                weight_mean = weights[:, g].mean()
+                global_bias_mean = global_bias.mean()
+                group_bias_mean = group_bias[:, g].mean()
+                lin_eq = f"{global_bias_mean:.1f} + {group_bias_mean:.1f} +" \
+                    f"{weight_mean:.1f} X_MMD"
+
+                data_g = np.array(stat[:, g])
+                iqr = stats.iqr(data_g)
+                mean = np.mean(data_g)
+                upper_iqr = mean + 0.5 * iqr
+                lower_iqr = mean - 0.5 * iqr
+                axs[row, col].axvline(x=upper_iqr, color="lightblue")
+                axs[row, col].axvline(x=lower_iqr, color="lightblue")
+                axs[row, col].axvline(x=0, color='lightgrey', linestyle="--")
+                sns.violinplot(x=data_g, ax=axs[row, col])
+                axs[row, col].set_title(self.group_names[g] + "\n" + stat_list_names[col] + "\n" + lin_eq, y=1.05)
+
+        plt.tight_layout()
+        plt.show()
+
+    def plot_regression_mmd_predictor(self, predictor="mmd mean", predictor_name="MMD", y_label="y_label",
+                                      plot_n_regression_lines=500, ncols=4):
+        assert predictor in self.obs_x_list, "the you must include 'mmd mean' as a predictor in your regression for this plot"
+        pred_col = self.obs_x_list.index(predictor)
+        #print(f"{predictor} col", pred_col)
+
+        weights = self.posterior_samples["weights"]  # [S, G, X]
+        global_bias = self.posterior_samples["global_bias"]  # [S, 1]
+        group_bias = self.posterior_samples["group_bias"]  # [S, G]
+        #group_student_df = self.posterior_samples["student_df"]  # [S, G]
+        #group_student_scale = self.posterior_samples["student_scale"]  # [S, G]
+        preds = self.posterior_predictions["obs"]  # [S, X]
+        x_col = self.obs_x[:, pred_col]  # [X]
+
+        min_col, max_col = x_col.min(), x_col.max()
+        x_lin = np.linspace(start=min_col, stop=max_col, num=1000)
+
+        # We have N_chains * N_samples, which is too much for plotting, subsample N=<plot_n_regression_lines>
+        sub_sample_ids = np.random.randint(0, high=weights.shape[0], size=plot_n_regression_lines, dtype=int)
+
+        nrows = int(np.ceil(self.G / ncols))
+        fig, axs = plt.subplots(nrows=nrows, ncols=ncols, figsize=(ncols * 4, nrows * 4),
+                                sharex=True, sharey=True)
+
+        for g in range(self.G):
+            row = g // ncols
+            col = g % ncols
+
+            x_g = x_col[self.obs_g == g]
+            y_g = self.obs_y[self.obs_g == g]
+            p_g = preds[0, self.obs_g == g]
+
+            # Scatter predictions & data points
+            axs[row, col].scatter(x_g, y_g, alpha=0.1, color="green", label='group data')
+            axs[row, col].scatter(x_g, p_g, alpha=0.1, color="blue", label='group preds')
+
+            # Subsample group weights and take the col that relates to the predictor we care about
+            sub_weights = weights[sub_sample_ids, g, pred_col][None, :]
+            sub_global_bias = global_bias[sub_sample_ids].squeeze(1)[None, :]
+            sub_group_bias = group_bias[sub_sample_ids, g][None, :]
+
+            # print("sub_weights.shape", sub_weights.shape)
+            # print("sub_global_bias.shape", sub_global_bias.shape)
+            # print("sub_group_bias.shape", sub_group_bias.shape)
+
+            weight_mean = weights[:, g, pred_col].mean()
+            global_bias_mean = global_bias.mean()
+            group_bias_mean = group_bias[:, g].mean()
+
+            # [1000, 1], [1, 100] -> [1000, 100]
+            y_pred = x_lin[:, None] * sub_weights + sub_global_bias + sub_group_bias
+
+            for i in range(plot_n_regression_lines):
+                label = "sampled reg. line" if i == 0 else None
+                axs[row, col].plot(x_lin, y_pred[:, i], lw=0.3, alpha=0.2, color="pink", label=label)
+
+            y_mean = x_lin * weight_mean + global_bias_mean + group_bias_mean
+            axs[row, col].plot(x_lin, y_mean, lw=0.8, alpha=0.8, color="red", label="avg reg. line")
+
+            title = f"{self.group_names[g]}\n{global_bias_mean:.1f} + {group_bias_mean:.1f} +" \
+                    f"{weight_mean:.1f} {predictor_name}"
+
+            axs[row, col].set_title(title, y=1.05)
+            # axs[row, col].set_ylim([50, 100])
+            axs[row, col].set_xlabel(predictor_name)
+            axs[row, col].set_ylabel(y_label, size=8)
+
+        leg = axs[0, 3].legend(loc=(1.05, 0.75))
+        for lh in leg.legendHandles:
+            lh.set_alpha(1)
+
+        plt.tight_layout()
+        plt.show()
+
+    def residuals_plots(self):
+
+        # [Ns, Nx]
+        predictions = self.posterior_predictions["obs"]
+
+        ys_per_group = []
+        preds_per_group = []
+        res_per_group = []
+
+        # record SAMPLE mean (not prediction mean)
+        preds_mean_per_group = []
+        res_mean_per_group = []
+
+        hpdi_residuals = []
+        hpdi_preds = []
+        hpdi_ys = []
+
+        for g in range(self.G):
+            y = self.obs_y[self.obs_g == g]
+            preds = predictions[:, self.obs_g == g]
+            res = y - preds
+
+            # [Ns, Ng]
+            preds_per_group.append(preds)
+            res_per_group.append(res)
+
+            # [Ng]
+            ys_per_group.append(y)
+
+            # [Ng]
+            preds_mean_per_group.append(preds.mean(axis=0))
+            res_mean_per_group.append(res.mean(axis=0))
+
+            hpdi_residuals.append(hpdi(res.mean(axis=0), 0.9))
+            hpdi_ys.append(hpdi(y, 0.9))
+
+            # print(preds.mean(axis=0).shape)
+
+            hpdi_preds.append(hpdi(preds.flatten(), 0.9))
+
+        # [N_groups, 2]
+        hpdi_residuals = np.stack(hpdi_residuals, axis=0)
+        hpdi_ys = np.stack(hpdi_ys, axis=0)
+        hpdi_preds = np.stack(hpdi_preds, axis=0)
+
+        fig, axs = plt.subplots(ncols=2, figsize=(14, int(0.75*self.G)))
+        y = np.arange(self.G)
+
+        axs[0].plot(jnp.zeros(self.G), y, "--", label="zero line")
+        # Plot the hpdi of the residuals and a dot in the center
+        axs[0].errorbar(
+            hpdi_residuals.mean(axis=1), y, xerr=hpdi_residuals[:, 1] - hpdi_residuals.mean(axis=1),
+            marker="o", ms=5, mew=4, ls="none", alpha=0.8, color="red", label="residuals", capsize=3.0, capthick=0.5)
+        axs[0].set_yticks(y)
+        axs[0].set_title("Residual 90% HPDI intervals")
+        axs[0].set_yticklabels(self.group_names, fontsize=10);
+        axs[0].legend(loc=(1.02, 0.9))
+
+        axs[1].plot(np.ones(self.G) * hpdi_ys.mean(), y, "--", label="global true mean")
+        axs[1].errorbar(
+            hpdi_ys.mean(axis=1), y, xerr=hpdi_ys[:, 1] - hpdi_ys.mean(axis=1), marker="o", ms=5, mew=4,
+            ls="none", alpha=0.7, label="true", capsize=3.0, capthick=0.5
+        )
+        axs[1].errorbar(
+            hpdi_preds.mean(axis=1), y, xerr=hpdi_preds[:, 1] - hpdi_preds.mean(axis=1), marker="o", ms=5,
+            mew=4, ls="none", alpha=0.7, label="predicted", color="red", capsize=3.0, capthick=0.5
+        )
+        axs[1].set_yticks(y)
+        axs[1].set_title("True versus predicted 90% HPDI intervals")
+        axs[1].set_yticklabels(["" for _ in y], fontsize=10);
+        axs[1].legend(loc=(1.02, 0.85))
+        plt.tight_layout()
+        plt.show()
+
+    def full_analysis(self, num_pp_samples=400, num_prior_samples=1000, data_plots=True, analysis_plots=True,
+                      residuals=True, prior_plots=True, posterior_plots=True, arviz_plots=True, predictor_col="mmd mean"):
         if data_plots:
             self.plot_correlations()
 
@@ -506,3 +705,11 @@ class NumpyroGLM:
             if self.correlate_predictors:
                 self.plot_weights_correlation()
             self.plot_group_bias()
+
+        if residuals:
+            self.residuals_plots()
+
+        if analysis_plots:
+            self.plot_group_specific_params(predictor_col=predictor_col)
+            self.plot_regression_mmd_predictor(predictor=predictor_col, predictor_name="MMD", y_label=self.obs_y_name,
+                                                plot_n_regression_lines=200, ncols=4)
