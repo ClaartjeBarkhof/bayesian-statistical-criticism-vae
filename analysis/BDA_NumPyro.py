@@ -22,13 +22,22 @@ numpyro.set_host_device_count(NUM_CHAINS)
 
 print(f"Running on NumPryo v{numpyro.__version__}")
 
-class NumpyroGLM:
-    def __init__(self, df, group_name_df, obs_x_list, obs_g_name, obs_y_name, correlate_predictors=False,
-                 obs_dist="binomial", num_samples=1000, num_warmup=1000, num_chains=3, inverse_data_transform=None):
-        self.df = df
 
-        self.group_name_df = group_name_df
-        self.group_names = group_name_df.sort_values("group_id")["group_name"].values.tolist()
+def create_group_df(df, group_by, group_id_col="group_id", group_name_col="group_name"):
+    df[group_id_col] = df.groupby(group_by).grouper.group_info[0]
+    df[group_name_col] = df[group_by].apply(lambda row: '_'.join(row.values.astype(str)), axis=1)
+    group_df = df[group_by + [group_id_col]].value_counts().reset_index()[group_by + [group_id_col]]
+    group_df[group_name_col] = group_df[group_by].apply(lambda row: ' & '.join(row.values.astype(str)), axis=1).values
+    return df, group_df
+
+
+class NumpyroGLM:
+    def __init__(self, df, group_by, obs_x_list, obs_y_name, correlate_predictors=False,
+                 obs_dist="binomial", num_samples=1000, num_warmup=1000, num_chains=3, inverse_data_transform=None):
+
+        self.df, self.group_name_df = create_group_df(df, group_by=group_by,
+                                                      group_id_col="group_id", group_name_col="group_name")
+        self.group_names = self.group_name_df.sort_values("group_id")["group_name"].values.tolist()
 
         self.num_samples = num_samples
         self.num_chains = num_chains
@@ -43,19 +52,20 @@ class NumpyroGLM:
         if self.obs_dist == "student_t":
             self.var_names += ["student_scale", "student_df"]
         elif self.obs_dist == "log_normal":
-            self.var_names += ["l_normal_scale"]
+            self.var_names += ["normal_scale"]
 
         self.correlate_predictors = correlate_predictors
 
         self.obs_x_list = obs_x_list
-        self.obs_g_name = obs_g_name
         self.obs_y_name = obs_y_name
 
         self.make_init_assertions()
 
         self.obs_x = df[obs_x_list].values
         self.obs_y = df[obs_y_name].values
-        self.obs_g = df[obs_g_name].values
+        self.obs_g = df["group_id"].values
+
+        print("obs_g", self.obs_g)
 
         self.G = len(np.unique(self.obs_g))
         self.D = self.obs_x.shape[1]
@@ -80,7 +90,7 @@ class NumpyroGLM:
 
         self.print_init()
 
-    def model(self, obs_x=None, obs_g=None, obs_y=None):
+    def model(self, obs_x=None, obs_y=None):
         # GLOBAL BIAS
         global_bias = numpyro.sample(
             "global_bias",
@@ -119,14 +129,14 @@ class NumpyroGLM:
                         ).to_event(1)
                     )
 
-                if self.obs_dist == "log_normal" or self.obs_dist == "normal" or self.obs_dist == "truncated_normal":
-                    l_normal_scale = numpyro.sample("l_normal_scale", dist.Uniform(low=0.1, high=10.0))
+                if "normal" in self.obs_dist:
+                    normal_scale = numpyro.sample("normal_scale", dist.Uniform(low=0.1, high=10.0))
                 elif self.obs_dist == "student_t":
                     # See section 15.2 of https://jrnold.github.io/bayesian_notes/robust-regression.html:
                     student_scale = numpyro.sample("student_scale", dist.Gamma(concentration=2.0, rate=0.1))
                     student_df = numpyro.sample("student_df", dist.Exponential(rate=1.0 / 10.0))
                 else:
-                    l_normal_scale, student_scale, student_df = 0.0, 0.0, 0.0
+                    normal_scale, student_scale, student_df = 0.0, 0.0, 0.0
 
             # [G, D]*[N, D] + [N] -> [N, D]*[N, D] + [N] -> [N]
             obs_x = (obs_x - obs_x.mean(axis=0, keepdims=True)) / obs_x.std(axis=0, keepdims=True)
@@ -141,11 +151,76 @@ class NumpyroGLM:
             elif self.obs_dist == "student_t":
                 dist_y = dist.StudentT(df=student_df[self.obs_g], loc=eta, scale=student_scale[self.obs_g])
             elif self.obs_dist == "log_normal":
-                dist_y = dist.LogNormal(loc=eta, scale=l_normal_scale[self.obs_g])
+                dist_y = dist.LogNormal(loc=eta, scale=normal_scale[self.obs_g])
             elif self.obs_dist == "normal":
-                dist_y = dist.Normal(loc=eta, scale=l_normal_scale[self.obs_g])
+                dist_y = dist.Normal(loc=eta, scale=normal_scale[self.obs_g])
             elif self.obs_dist == "truncated_normal":
-                dist_y = dist.TruncatedNormal(low=0.0, loc=eta, scale=l_normal_scale[self.obs_g])
+                dist_y = dist.TruncatedNormal(low=0.0, loc=eta, scale=normal_scale[self.obs_g])
+
+            numpyro.sample("obs", dist_y, obs=obs_y)
+
+    def hierarchical_model(self, obs_x=None, obs_y=None):
+        # GLOBAL BIAS
+        global_bias = numpyro.sample(
+            "global_bias",
+            dist.Laplace(
+                np.zeros(1),
+                np.ones(1) / 2.
+            )
+        )
+
+        # DECODER GROUP BIAS
+        with numpyro.plate("decoder_groups_plate", ...):
+            decoder_group_bias = numpyro.sample(
+                "decoder_group_bias",
+                dist.Laplace(
+                    0.0,
+                    1. / 2.
+                )
+            )
+
+        # OBJECTIVE GROUP BIAS
+        with numpyro.plate("objective_groups_plate", ...):
+            objective_group_bias = numpyro.sample(
+                "objective_group_bias",
+                dist.Laplace(
+                    0.0,
+                    1. / 2.
+                )
+            )
+
+        # EXPERIMENT GROUP BIAS
+        with numpyro.plate("experiment_groups_plate", ...):
+            experiment_group_bias = numpyro.sample(
+                "experiment_group_bias",
+                dist.Laplace(
+                    0.0,
+                    1. / 2.
+                )
+            )
+
+            if "normal" in self.obs_dist:
+                normal_scale = numpyro.sample("normal_scale", dist.Uniform(low=0.1, high=10.0))
+            elif self.obs_dist == "student_t":
+                # See section 15.2 of https://jrnold.github.io/bayesian_notes/robust-regression.html:
+                student_scale = numpyro.sample("student_scale", dist.Gamma(concentration=2.0, rate=0.1))
+                student_df = numpyro.sample("student_df", dist.Exponential(rate=1.0 / 10.0))
+            else:
+                normal_scale, student_scale, student_df = 0.0, 0.0, 0.0
+
+        eta = global_bias + decoder_group_bias[...] + objective_group_bias[...] + experiment_group_bias[...]
+
+        with numpyro.plate("data", self.N):
+            if self.obs_dist == "binomial":
+                dist_y = dist.Binomial(self.total_count, logits=eta)
+            elif self.obs_dist == "student_t":
+                dist_y = dist.StudentT(df=student_df[self.obs_g], loc=eta, scale=student_scale[self.obs_g])
+            elif self.obs_dist == "log_normal":
+                dist_y = dist.LogNormal(loc=eta, scale=normal_scale[self.obs_g])
+            elif self.obs_dist == "normal":
+                dist_y = dist.Normal(loc=eta, scale=normal_scale[self.obs_g])
+            elif self.obs_dist == "truncated_normal":
+                dist_y = dist.TruncatedNormal(low=0.0, loc=eta, scale=normal_scale[self.obs_g])
 
             numpyro.sample("obs", dist_y, obs=obs_y)
 
@@ -175,14 +250,11 @@ class NumpyroGLM:
         assert all(elem in self.df.columns for elem in
                    self.obs_x_list), "the predictor variable names must be columns of the DF"
         assert self.obs_y_name in self.df.columns, "the target variable y must be a column of the DF"
-        assert self.obs_g_name in self.df.columns, "the group_id variable must be a column of the DF"
         valid_dists = ["binomial", "student_t", "log_normal", "normal", "truncated_normal"]
         assert self.obs_dist in valid_dists, f"the observation distribution must be in {valid_dists}"
-        assert "group_id" in self.group_name_df.columns, "expects a column group_id in self.group_name_df"
-        assert "group_name" in self.group_name_df.columns, "expects a column group_id in self.group_name_df"
 
     def run(self):
-        self.mcmc.run(self.rng_key, obs_x=self.obs_x, obs_g=self.obs_g, obs_y=self.obs_y)
+        self.mcmc.run(self.rng_key, obs_x=self.obs_x, obs_y=self.obs_y)
         self.run_bool = True
         self.mcmc.print_summary()
         # group_by_chain=False: [K*D, ...]
@@ -198,7 +270,7 @@ class NumpyroGLM:
             self.prior_predictive = Predictive(self.model, num_samples=num_prior_samples)
 
         # [num_prior_samples, N]: for every x take multiple prior samples
-        self.prior_predictions = self.prior_predictive(rng_key_, obs_x=self.obs_x, obs_g=self.obs_g, obs_y=None)
+        self.prior_predictions = self.prior_predictive(rng_key_, obs_x=self.obs_x, obs_y=None)
 
         if plot:
             self.plot_trace_predictions(full=True, prior=True)
@@ -230,7 +302,8 @@ class NumpyroGLM:
 
             label = f"{var}" if var != "obs" else "pred"
 
-            if not (np.any(np.isinf(np.array(predictions[var]).flatten())) or np.any(np.isnan(np.array(predictions[var]).flatten()))):
+            if not (np.any(np.isinf(np.array(predictions[var]).flatten())) or np.any(
+                    np.isnan(np.array(predictions[var]).flatten()))):
                 _ = ax.hist(np.array(predictions[var]).flatten(), label=label, density=True, bins=40, lw=0, alpha=0.7)
             if var == "obs":
                 if not (np.any(np.isinf(np.array(self.obs_y))) or np.any(np.isnan(np.array(self.obs_y)))):
@@ -245,13 +318,13 @@ class NumpyroGLM:
 
         if full:
             # Group variables
-            for var in ["group_bias", "l_normal_scale", "student_scale", "student_df"]:
+            for var in ["group_bias", "normal_scale", "student_scale", "student_df"]:
                 if ("student" in var) and ("student" not in self.obs_dist):
                     continue
                 if ("normal" in var) and ("normal" not in self.obs_dist):
                     continue
 
-                fig, axs = plt.subplots(ncols=self.G, figsize=(int(4*self.G), 4))
+                fig, axs = plt.subplots(ncols=self.G, figsize=(int(4 * self.G), 4))
 
                 for g in range(self.G):
                     if not (np.any(np.isinf(np.array(predictions[var][:, g]).flatten())) or np.any(
@@ -266,14 +339,15 @@ class NumpyroGLM:
                 plt.show()
 
             # Group + predictor weights
-            fig, axs = plt.subplots(ncols=self.D, nrows=self.G, figsize=(int(4 * self.D), int(self.G*4)),
+            fig, axs = plt.subplots(ncols=self.D, nrows=self.G, figsize=(int(4 * self.D), int(self.G * 4)),
                                     sharex="all", sharey="all")
 
             for row in range(self.G):
                 for col in range(self.D):
                     if not (np.any(np.isinf(np.array(predictions["weights"][:, row, col]).flatten())) or np.any(
                             np.isnan(np.array(np.array(predictions["weights"][:, row, col]).flatten())))):
-                        axs[row, col].hist(np.array(predictions["weights"][:, row, col]).flatten(), density=True, bins=40, lw=0, alpha=0.7)
+                        axs[row, col].hist(np.array(predictions["weights"][:, row, col]).flatten(), density=True,
+                                           bins=40, lw=0, alpha=0.7)
                     axs[row, col].set_title(f"G={self.group_names[row]}\nD={self.obs_x_list[col]}", y=1.02)
 
             plt.suptitle(f"{posterior_prior} - weights linear")
@@ -287,91 +361,12 @@ class NumpyroGLM:
         if self.posterior_predictive is None:
             self.posterior_predictive = Predictive(self.model, self.posterior_samples)
 
-        self.posterior_predictions = self.posterior_predictive(rng_key_, obs_x=self.obs_x, obs_g=self.obs_g)
+        self.posterior_predictions = self.posterior_predictive(rng_key_, obs_x=self.obs_x)
 
         if plot:
             self.plot_trace_predictions(full=True, prior=False)
 
         return self.posterior_predictions
-
-    def predictive_checks(self, prior=False):
-        if prior:
-            if self.prior_predictions is None:
-                self.get_prior_predictions()
-            preds = np.array(self.prior_predictions["obs"])
-        else:
-            if self.posterior_predictions is None:
-                self.get_posterior_predictions()
-            preds = np.array(self.posterior_predictions["obs"]) #.reshape(-1, self.posterior_predictions["obs"].shape[-1])
-            preds = preds.reshape(self.num_chains, self.num_samples, self.N)
-            preds = preds[0, :, :]  # only consider the first chain, to make plotting less heavy
-
-        # print("predictive checks shape preds:", preds.shape)
-
-        # SHAPES:
-        # posterior_predictions [N_chains*N_samples, N_data]
-        # prior_predictions [N_samples, N_data]
-        # samples (generalising both): [N_s, N_d]
-
-        obs_mean = np.mean(self.obs_y)
-        obs_std = np.std(self.obs_y)
-        obs_median = np.median(self.obs_y)
-        obs_mode = np.max(self.obs_y)
-        obs_skew = obs_mean ** (-0.5)
-        obs_kurtosis = obs_mean ** (-1)
-
-        obs_stats = [obs_mean, obs_std, obs_median, obs_mode, obs_skew, obs_kurtosis]
-
-        pred_mean = np.mean(preds, axis=1)
-        pred_std = np.std(preds, axis=1)
-        pred_median = np.median(preds, axis=1)
-        pred_mode = np.max(preds, axis=1)
-        pred_skew = pred_mean ** (-0.5)
-        pred_kurtosis = pred_mean ** (-1)
-
-        preds_stats = [pred_mean, pred_std, pred_median, pred_mode, pred_skew, pred_kurtosis]
-        preds_stats_means = [s.mean() for s in preds_stats]
-        preds_stats_std = [s.std() for s in preds_stats]
-
-        # predictive p values
-        p_vals = [(p > o).mean() for p, o in zip(preds_stats, obs_stats)]
-
-        stats = ["mean", "std", "median", "max", "skew", "kurtosis"]
-
-        headers = ['check', 'p_val', 'obs', 'pred (mean)', 'pred (std)']
-        rows = [['S', 1, None, preds.shape[0], None], ['shape', None, self.obs_y.shape, preds.shape, None]]
-
-        for s, p_v, o, p_m, p_std in zip(stats, p_vals, obs_stats, preds_stats_means, preds_stats_std):
-            rows.append([s, f"{p_v:.3f}", f"{o:.3f}", f"{p_m:.3f}", f"{p_std:.3f}"])
-
-        for C in [0.25, 0.5, 0.75, 1., 2.]:
-            mean_check = (np.abs(pred_mean - obs_mean) < C * pred_std)
-            rows.append([f"mean within {C:.2f}*std", None, None, f"{mean_check.mean():.3f}", f"{mean_check.std():.3f}"])
-
-        print(tabulate(rows, headers=headers))  # , floatfmt=(None, ".3f", ".3f", ".3f")
-
-        ncols = 3
-        nrows = int(np.ceil(len(stats) / ncols))
-
-        fig, axs = plt.subplots(nrows=nrows, ncols=ncols, figsize=(14, 4))
-
-        for i, (s, o, p, pm) in enumerate(zip(stats, obs_stats, preds_stats, preds_stats_means)):
-            r, c = i // ncols, i % ncols
-            if np.any(np.isinf(p)) or np.any(np.isnan(p)):
-                print(f"encountered NAN in preds of {s} = {np.any(np.isnan(p))}")
-                print(f"encountered INF in preds of {s} = {np.any(np.isinf(p))}")
-                continue
-
-            axs[r, c].hist(np.array(p), bins=40, lw=0, density=True)
-            axs[r, c].axvline(o, color='g', linestyle='dashed', label='obs')
-            axs[r, c].axvline(pm, color='r', linestyle='dashed', label='pred mean T')
-            axs[r, c].set_title(s)
-
-        title = "Prior predictive checks" if prior else "Posterior predictive checkes"
-        plt.suptitle(title)
-        plt.legend()
-        plt.tight_layout()
-        plt.show()
 
     def plot_ppc(self, num_pp_samples=10):
         self.plot_check()
@@ -396,9 +391,9 @@ class NumpyroGLM:
                     l1.append(f"{g}-{x}")
                 l.append(l1)
 
-            #coords = {"group": self.group_names, "group-predictor": l}
-            #dims = {"group_bias": ["group"], "weights": ["group-predictor"]}
-            #, dims=dims, coords=coords
+            # coords = {"group": self.group_names, "group-predictor": l}
+            # dims = {"group_bias": ["group"], "weights": ["group-predictor"]}
+            # , dims=dims, coords=coords
             self.arviz_data = az.from_numpyro(posterior=self.mcmc, num_chains=self.num_chains)
 
     def plot_post_preds_per_group(self, N_cols=2):
@@ -443,7 +438,7 @@ class NumpyroGLM:
 
         if not (np.any(np.isinf(obs_y.flatten())) or np.any(np.isnan(obs_y.flatten()))):
             all_ax.hist(obs_y.flatten(), color=colors[2], density=True, bins=40, label=f"Data", lw=0,
-                    alpha=0.7)
+                        alpha=0.7)
         all_ax.legend()
 
         for g in range(self.G):
@@ -500,7 +495,7 @@ class NumpyroGLM:
             dist_stats = [group_student_df, group_student_scale]
             dist_stat_names = ["group_student_df", "group_student_scale"]
         elif "normal" in self.obs_dist:
-            group_scale = self.posterior_samples["l_normal_scale"]
+            group_scale = self.posterior_samples["normal_scale"]
             dist_stats = [group_scale]
             dist_stat_names = ["group_normal_scale"]
 
@@ -518,7 +513,7 @@ class NumpyroGLM:
                 global_bias_mean = global_bias.mean()
                 group_bias_mean = group_bias[:, g].mean()
                 lin_eq = f"{global_bias_mean:.1f} + {group_bias_mean:.1f} +" \
-                    f"{weight_mean:.1f} X_MMD"
+                         f"{weight_mean:.1f} X_MMD"
 
                 data_g = np.array(stat[:, g])
                 iqr = stats.iqr(data_g)
@@ -538,13 +533,13 @@ class NumpyroGLM:
                                       plot_n_regression_lines=500, ncols=4):
         assert predictor in self.obs_x_list, "the you must include 'mmd mean' as a predictor in your regression for this plot"
         pred_col = self.obs_x_list.index(predictor)
-        #print(f"{predictor} col", pred_col)
+        # print(f"{predictor} col", pred_col)
 
         weights = self.posterior_samples["weights"]  # [S, G, X]
         global_bias = self.posterior_samples["global_bias"]  # [S, 1]
         group_bias = self.posterior_samples["group_bias"]  # [S, G]
-        #group_student_df = self.posterior_samples["student_df"]  # [S, G]
-        #group_student_scale = self.posterior_samples["student_scale"]  # [S, G]
+        # group_student_df = self.posterior_samples["student_df"]  # [S, G]
+        # group_student_scale = self.posterior_samples["student_scale"]  # [S, G]
         preds = self.posterior_predictions["obs"]  # [S, X]
         x_col = self.obs_x[:, pred_col]  # [X]
 
@@ -660,7 +655,7 @@ class NumpyroGLM:
         hpdi_ys = np.stack(hpdi_ys, axis=0)
         hpdi_preds = np.stack(hpdi_preds, axis=0)
 
-        fig, axs = plt.subplots(ncols=2, figsize=(14, int(0.75*self.G)))
+        fig, axs = plt.subplots(ncols=2, figsize=(14, int(0.75 * self.G)))
         y = np.arange(self.G)
 
         axs[0].plot(jnp.zeros(self.G), y, "--", label="zero line")
@@ -690,19 +685,20 @@ class NumpyroGLM:
         plt.show()
 
     def full_analysis(self, num_pp_samples=400, num_prior_samples=1000, data_plots=True, analysis_plots=True,
-                      residuals=True, prior_plots=True, posterior_plots=True, arviz_plots=True, predictor_col="mmd mean"):
+                      residuals=True, prior_plots=True, posterior_plots=True, arviz_plots=True,
+                      predictor_col="mmd mean"):
         if data_plots:
             self.plot_correlations()
 
         if prior_plots:
             _ = self.get_prior_predictions(num_prior_samples=num_prior_samples, plot=True)
-            self.predictive_checks(prior=True)
+            predictive_checks(self, prior=True)
 
         self.run()
 
         if posterior_plots:
             _ = self.get_posterior_predictions(plot=True)
-            self.predictive_checks(prior=False)
+            predictive_checks(self, prior=False)
             self.plot_post_preds_per_group(N_cols=2)
 
         if arviz_plots:
@@ -719,4 +715,301 @@ class NumpyroGLM:
         if analysis_plots:
             self.plot_group_specific_params(predictor_col=predictor_col)
             self.plot_regression_mmd_predictor(predictor=predictor_col, predictor_name="MMD", y_label=self.obs_y_name,
-                                                plot_n_regression_lines=200, ncols=4)
+                                               plot_n_regression_lines=200, ncols=4)
+
+
+class HierarchicalModel:
+    def __init__(self, df, obs_y_name, obs_dist="binomial",
+                 num_samples=1000, num_warmup=1000, num_chains=3, inverse_data_transform=None):
+
+        self.df = df
+
+        self.decoder_names = list(df["decoder"].values)
+        self.experiment_names = list(df["clean_name"].values)
+        self.objective_names = list(df["objective"].values)
+
+        self.df, self.decoder_group_df = create_group_df(self.df, ["decoder"], group_id_col="decoder_group_id",
+                                                         group_name_col="decoder_group_name")
+        self.df, self.objective_group_df = create_group_df(self.df, ["objective"], group_id_col="objective_group_id",
+                                                           group_name_col="objective_group_name")
+        self.df, self.experiment_group_df = create_group_df(self.df, ["clean_name"], group_id_col="experiment_group_id",
+                                                            group_name_col="experiment_group_name")
+
+        self.num_samples = num_samples
+        self.num_chains = num_chains
+        self.num_warmup = num_warmup
+
+        self.inverse_data_transform = inverse_data_transform
+
+        self.obs_dist = obs_dist
+
+        self.var_names = ["global_bias", "decoder_group_bias", "objective_group_bias", "experiment_group_bias"]
+
+        if self.obs_dist == "student_t":
+            self.var_names += ["student_scale", "student_df"]
+        elif self.obs_dist == "log_normal":
+            self.var_names += ["normal_scale"]
+
+        self.obs_y_name = obs_y_name
+
+        self.make_init_assertions()
+
+        self.obs_y = df[obs_y_name].values
+
+        self.obs_decoder_group_id = df["decoder_group_id"].values
+        self.obs_objective_group_id = df["objective_group_id"].values
+        self.obs_experiment_group_id = df["experiment_group_id"].values
+
+        self.G_dec = len(self.decoder_group_df)
+        self.G_obj = len(self.objective_group_df)
+        self.G_exp = len(self.experiment_group_df)
+        self.N = len(self.df)
+
+        self.total_count = 28 * 28
+        self.rng_key = random.PRNGKey(0)
+
+        nuts_kernel = NUTS(self.model)
+        self.mcmc = MCMC(nuts_kernel, num_samples=num_samples, num_warmup=num_warmup, num_chains=num_chains)
+        self.run_bool = False
+
+        self.prior_predictive = None
+        self.prior_predictions = None
+
+        self.posterior_predictive = None
+        self.posterior_predictions = None
+
+        self.posterior_samples = None
+
+        self.arviz_data = None
+
+        self.print_init()
+
+    def model(self, obs_y=None):
+        # GLOBAL BIAS
+        global_bias = numpyro.sample(
+            "global_bias",
+            dist.Laplace(
+                np.zeros(1),
+                np.ones(1) / 2.
+            )
+        )
+
+        # DECODER GROUP BIAS
+        with numpyro.plate("decoder_groups_plate", self.G_dec):
+            decoder_group_bias = numpyro.sample(
+                "decoder_group_bias",
+                dist.Laplace(
+                    0.0,
+                    1. / 2.
+                )
+            )
+
+        # OBJECTIVE GROUP BIAS
+        with numpyro.plate("objective_groups_plate", self.G_obj):
+            objective_group_bias = numpyro.sample(
+                "objective_group_bias",
+                dist.Laplace(
+                    0.0,
+                    1. / 2.
+                )
+            )
+
+        # EXPERIMENT GROUP BIAS
+        with numpyro.plate("experiment_groups_plate", self.G_exp):
+            experiment_group_bias = numpyro.sample(
+                "experiment_group_bias",
+                dist.Laplace(
+                    0.0,
+                    1. / 2.
+                )
+            )
+
+            if "normal" in self.obs_dist:
+                normal_scale = numpyro.sample("normal_scale", dist.Uniform(low=0.1, high=10.0))
+            elif self.obs_dist == "student_t":
+                # See section 15.2 of https://jrnold.github.io/bayesian_notes/robust-regression.html:
+                student_scale = numpyro.sample("student_scale", dist.Gamma(concentration=2.0, rate=0.1))
+                student_df = numpyro.sample("student_df", dist.Exponential(rate=1.0 / 10.0))
+            else:
+                normal_scale, student_scale, student_df = 0.0, 0.0, 0.0
+
+        eta = global_bias + decoder_group_bias[self.obs_decoder_group_id] + \
+              objective_group_bias[self.obs_objective_group_id] + experiment_group_bias[self.obs_experiment_group_id]
+
+        with numpyro.plate("data", self.N):
+            if self.obs_dist == "binomial":
+                dist_y = dist.Binomial(self.total_count, logits=eta)
+            elif self.obs_dist == "student_t":
+                dist_y = dist.StudentT(df=student_df[self.obs_experiment_group_id], loc=eta, scale=student_scale[self.obs_experiment_group_id])
+            elif self.obs_dist == "log_normal":
+                dist_y = dist.LogNormal(loc=eta, scale=normal_scale[self.obs_experiment_group_id])
+            elif self.obs_dist == "normal":
+                dist_y = dist.Normal(loc=eta, scale=normal_scale[self.obs_experiment_group_id])
+            elif self.obs_dist == "truncated_normal":
+                dist_y = dist.TruncatedNormal(low=0.0, loc=eta, scale=normal_scale[self.obs_experiment_group_id])
+
+            numpyro.sample("obs", dist_y, obs=obs_y)
+
+    def print_init(self):
+        print(f"Optimisation:")
+        print(f"MCMC NUTS algo: N_warmup={self.num_warmup}, N_samples={self.num_samples}, N_chains={self.num_chains}")
+
+    def make_init_assertions(self):
+        assert self.obs_y_name in self.df.columns, "the target variable y must be a column of the DF"
+        valid_dists = ["binomial", "student_t", "log_normal", "normal", "truncated_normal"]
+        assert self.obs_dist in valid_dists, f"the observation distribution must be in {valid_dists}"
+        for name in ["decoder", "objective", "clean_name"]:
+            assert name in self.df.columns, f"{name} must be present in columns to group by"
+
+    def run(self):
+        self.mcmc.run(self.rng_key, obs_y=self.obs_y)
+        self.run_bool = True
+        self.mcmc.print_summary()
+        # group_by_chain=False: [K*D, ...]
+        self.posterior_samples = self.mcmc.get_samples(group_by_chain=False)
+        print("posterior samples shapes:")
+        for k, v in self.posterior_samples.items():
+            print(k, v.shape)
+
+    def get_prior_predictions(self, num_prior_samples=100):
+        rng_key, rng_key_ = random.split(self.rng_key)
+
+        if self.prior_predictive is None:
+            self.prior_predictive = Predictive(self.model, num_samples=num_prior_samples)
+
+        # [num_prior_samples, N]: for every x take multiple prior samples
+        self.prior_predictions = self.prior_predictive(rng_key_, obs_x=self.obs_x, obs_g=self.obs_g, obs_y=None)
+
+        return self.prior_predictions
+
+    def get_posterior_predictions(self):
+        self.run_check()
+
+        rng_key, rng_key_ = random.split(self.rng_key)
+        if self.posterior_predictive is None:
+            self.posterior_predictive = Predictive(self.model, self.posterior_samples)
+
+        self.posterior_predictions = self.posterior_predictive(rng_key_, obs_x=self.obs_x, obs_g=self.obs_g)
+
+        return self.posterior_predictions
+
+    def run_check(self):
+        if not self.run_bool:
+            self.run()
+
+    def plot_check(self):
+        self.run_check()
+        if self.arviz_data is None:
+            self.arviz_data = az.from_numpyro(posterior=self.mcmc, num_chains=self.num_chains)
+
+    def plot_trace(self):
+        self.plot_check()
+        az.plot_trace(self.arviz_data, var_names=self.var_names, compact=False)
+
+    def plot_posterior(self):
+        self.plot_check()
+        az.plot_posterior(self.arviz_data, var_names=self.var_names)
+
+    def plot_group_bias(self):
+        self.plot_check()
+
+        az.plot_forest(self.arviz_data, kind='forestplot', var_names=["decoder_group_bias"])
+        az.plot_forest(self.arviz_data, kind='forestplot', var_names=["objective_groups_plate"])
+        az.plot_forest(self.arviz_data, kind='forestplot', var_names=["experiment_group_bias"])
+
+    def full_analysis(self, num_prior_samples=1000, prior_plots=True, posterior_plots=True, arviz_plots=True):
+
+        if prior_plots:
+            _ = self.get_prior_predictions(num_prior_samples=num_prior_samples)
+            predictive_checks(self, prior=True)
+
+        self.run()
+
+        if posterior_plots:
+            _ = self.get_posterior_predictions()
+            predictive_checks(self, prior=False)
+
+        if arviz_plots:
+            self.plot_trace()
+            self.plot_posterior()
+            self.plot_group_bias()
+
+
+def predictive_checks(model, prior=False):
+    if prior:
+        if model.prior_predictions is None:
+            model.get_prior_predictions()
+        preds = np.array(model.prior_predictions["obs"])
+    else:
+        if model.posterior_predictions is None:
+            model.get_posterior_predictions()
+        preds = np.array(model.posterior_predictions["obs"]) #.reshape(-1, self.posterior_predictions["obs"].shape[-1])
+        preds = preds.reshape(model.num_chains, model.num_samples, model.N)
+        preds = preds[0, :, :]  # only consider the first chain, to make plotting less heavy
+
+    # print("predictive checks shape preds:", preds.shape)
+
+    # SHAPES:
+    # posterior_predictions [N_chains*N_samples, N_data]
+    # prior_predictions [N_samples, N_data]
+    # samples (generalising both): [N_s, N_d]
+
+    obs_mean = np.mean(model.obs_y)
+    obs_std = np.std(model.obs_y)
+    obs_median = np.median(model.obs_y)
+    obs_mode = np.max(model.obs_y)
+    obs_skew = obs_mean ** (-0.5)
+    obs_kurtosis = obs_mean ** (-1)
+
+    obs_stats = [obs_mean, obs_std, obs_median, obs_mode, obs_skew, obs_kurtosis]
+
+    pred_mean = np.mean(preds, axis=1)
+    pred_std = np.std(preds, axis=1)
+    pred_median = np.median(preds, axis=1)
+    pred_mode = np.max(preds, axis=1)
+    pred_skew = pred_mean ** (-0.5)
+    pred_kurtosis = pred_mean ** (-1)
+
+    preds_stats = [pred_mean, pred_std, pred_median, pred_mode, pred_skew, pred_kurtosis]
+    preds_stats_means = [s.mean() for s in preds_stats]
+    preds_stats_std = [s.std() for s in preds_stats]
+
+    # predictive p values
+    p_vals = [(p > o).mean() for p, o in zip(preds_stats, obs_stats)]
+
+    stats = ["mean", "std", "median", "max", "skew", "kurtosis"]
+
+    headers = ['check', 'p_val', 'obs', 'pred (mean)', 'pred (std)']
+    rows = [['S', 1, None, preds.shape[0], None], ['shape', None, model.obs_y.shape, preds.shape, None]]
+
+    for s, p_v, o, p_m, p_std in zip(stats, p_vals, obs_stats, preds_stats_means, preds_stats_std):
+        rows.append([s, f"{p_v:.3f}", f"{o:.3f}", f"{p_m:.3f}", f"{p_std:.3f}"])
+
+    for C in [0.25, 0.5, 0.75, 1., 2.]:
+        mean_check = (np.abs(pred_mean - obs_mean) < C * pred_std)
+        rows.append([f"mean within {C:.2f}*std", None, None, f"{mean_check.mean():.3f}", f"{mean_check.std():.3f}"])
+
+    print(tabulate(rows, headers=headers))  # , floatfmt=(None, ".3f", ".3f", ".3f")
+
+    ncols = 3
+    nrows = int(np.ceil(len(stats) / ncols))
+
+    fig, axs = plt.subplots(nrows=nrows, ncols=ncols, figsize=(14, 4))
+
+    for i, (s, o, p, pm) in enumerate(zip(stats, obs_stats, preds_stats, preds_stats_means)):
+        r, c = i // ncols, i % ncols
+        if np.any(np.isinf(p)) or np.any(np.isnan(p)):
+            print(f"encountered NAN in preds of {s} = {np.any(np.isnan(p))}")
+            print(f"encountered INF in preds of {s} = {np.any(np.isinf(p))}")
+            continue
+
+        axs[r, c].hist(np.array(p), bins=40, lw=0, density=True)
+        axs[r, c].axvline(o, color='g', linestyle='dashed', label='obs')
+        axs[r, c].axvline(pm, color='r', linestyle='dashed', label='pred mean T')
+        axs[r, c].set_title(s)
+
+    title = "Prior predictive checks" if prior else "Posterior predictive checkes"
+    plt.suptitle(title)
+    plt.legend()
+    plt.tight_layout()
+    plt.show()
