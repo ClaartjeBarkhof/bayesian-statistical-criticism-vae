@@ -588,9 +588,16 @@ class NumpyroGLM:
 
             for i in range(plot_n_regression_lines):
                 label = "sampled reg. line" if i == 0 else None
-                axs[row, col].plot(x_lin, y_pred[:, i], lw=0.3, alpha=0.2, color="pink", label=label)
+                y = y_pred[:, i]
+                if self.obs_dist == "log_normal":
+                    y = np.exp(y)
+                axs[row, col].plot(x_lin, y, lw=0.3, alpha=0.2, color="pink", label=label)
 
             y_mean = x_lin * weight_mean + global_bias_mean + group_bias_mean
+
+            if self.obs_dist == "log_normal":
+                y_mean = np.exp(y_mean)
+
             axs[row, col].plot(x_lin, y_mean, lw=0.8, alpha=0.8, color="red", label="avg reg. line")
 
             title = f"{self.group_names[g]}\n{global_bias_mean:.1f} + {group_bias_mean:.1f} +" \

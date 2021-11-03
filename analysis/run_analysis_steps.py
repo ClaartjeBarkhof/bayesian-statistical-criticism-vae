@@ -60,22 +60,22 @@ run_df = make_run_overview_df(prefixes=prefixes)
 
 # ------------------------------------------------------------------------------------------------
 # Step 1: Encode, reconstruct, sample
-encode_reconstruct_sample(run_df, device=DEVICE, include_train=True,
-                          n_sample_batches=N_SAMPLE_BATCHES,
-                          sample_batch_size=SAMPLE_BATCH_SIZE, reverse=REVERSE)
+# encode_reconstruct_sample(run_df, device=DEVICE, include_train=True,
+#                           n_sample_batches=N_SAMPLE_BATCHES,
+#                           sample_batch_size=SAMPLE_BATCH_SIZE, reverse=REVERSE)
 
 # ------------------------------------------------------------------------------------------------
 # Step 2: Gather surprisal stats
 gather_surprisal_stats(device=DEVICE, include_train=True,
-                       batch_size_surprisal=BATCH_SIZE_SURPRISAL, n_iw_samples=N_IW_SAMPLES)
+                       batch_size_surprisal=BATCH_SIZE_SURPRISAL, n_iw_samples=N_IW_SAMPLES, reverse=REVERSE)
 
 # ------------------------------------------------------------------------------------------------
 # Step 3: Gather simple evaluation of validation and test set
-simple_evaluate_valid_test(run_df, device=DEVICE, batch_size=BATCH_SIZE, num_workers=NUM_WORKERS)
+# simple_evaluate_valid_test(run_df, device=DEVICE, batch_size=BATCH_SIZE, num_workers=NUM_WORKERS)
 
 # ------------------------------------------------------------------------------------------------
 # Step 4: KNN predictions of samples & reconstructions
-knn_predictions_for_samples_reconstructions(batch_size=KNN_BATCH_SIZE,
-                                            knn_mimicker_path="/home/cbarkhof/fall-2021/notebooks"
-                                                              "/KNN_mimicking_network.pt",
-                                            knn_path=None, device=DEVICE)
+# knn_predictions_for_samples_reconstructions(batch_size=KNN_BATCH_SIZE,
+#                                             knn_mimicker_path="/home/cbarkhof/fall-2021/notebooks"
+#                                                               "/KNN_mimicking_network.pt",
+#                                             knn_path=None, device=DEVICE)

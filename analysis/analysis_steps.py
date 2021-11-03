@@ -44,6 +44,8 @@ CHECKPOINT_DIR = f"{CODE_DIR}/run_files/checkpoints"
 ENCODE_RECONSTUCT_FILE = f"encode-reconstruct-test-valid.pt"
 SAMPLE_FILE = f"generative-samples.pt"
 
+AVG_DATA_SAMPLE_FILE = f"{CODE_DIR}/analysis/analysis-files/average_val_data_samples_per_class.p"
+
 SURPRISAL_RECONSTRUCT_FILE = "surprisal_reconstruct.pt"
 SURPRISAL_SAMPLE_FILE = "surprisal_sample.pt"
 SURPRISAL_DATA_FILE = "surprisal_data.pt"
@@ -60,7 +62,7 @@ DATA_SPACE_STATS = "data_space_stats.pickle"
 
 # -------------------------------------------------------------------------------------------------------------------
 # STEP 0: Fetch run data from W&B based on and filter on run_name prefixes
-def make_run_overview_df(prefixes):
+def make_run_overview_df(prefixes, add_data_group=False):
     runs = get_wandb_runs(entity="fall-2021-vae-claartje-wilker", project="fall-2021-VAE")
 
     q_z_x_mapper = {
@@ -125,6 +127,19 @@ def make_run_overview_df(prefixes):
                 break
 
     df = pd.DataFrame(sum_stats).transpose()
+
+    if add_data_group:
+        data_group = {
+            "objective": "data_group",
+            "l_rate": 0,
+            "beta_beta": 0,
+            "free_bits": 0,
+            "mdr_value": 0,
+            "l_mmd": 0,
+            "decoder": "data_group",
+            "run_name": "data_group"
+        }
+        df = df.append(data_group, ignore_index=True)
 
     return df
 
@@ -337,8 +352,9 @@ def surprisal_reconstructions(reconstruct_file, surprisal_reconstruct_file, vae_
     for phase in ['valid', 'test', 'train']:
         # [N, 1, 28, 28]
         reconstruct_loader = DataLoader(TensorDataset(rec_dict[phase]["reconstruct"]),
-                                        batch_size=batch_size_surprisal)
+                                        batch_size=batch_size_surprisal, shuffle=True)
         iw_ll_recon = []
+        counter = 0
         for i, x_in in enumerate(reconstruct_loader):
             print(f"... calculating importance weighted (n_samples={n_iw_samples})"
                   f" log likelihood {i:3d}/{len(reconstruct_loader)}", end="\r")
@@ -347,6 +363,11 @@ def surprisal_reconstructions(reconstruct_file, surprisal_reconstruct_file, vae_
 
             iw_ll = vae_model.estimate_log_likelihood_batch(x_in, n_samples=n_iw_samples, per_bit=False)
             iw_ll_recon.append(iw_ll)
+            counter += x_in.shape[0]
+
+            # we don't need it all
+            if counter > 2000:
+                break
 
         surprisal_reconstruct[phase] = torch.cat(iw_ll_recon).cpu()
         print("reconstruct", phase, "shape", surprisal_reconstruct[phase].shape)
@@ -355,12 +376,13 @@ def surprisal_reconstructions(reconstruct_file, surprisal_reconstruct_file, vae_
     torch.save(surprisal_reconstruct, surprisal_reconstruct_file)
 
 
-def surprisal_data(surprisal_data_file, data_loaders, vae_model, n_iw_samples):
+def surprisal_data(surprisal_data_file, data_loaders, vae_model, n_iw_samples, batch_size=30):
     print("Data")
     d = dict()
     for phase, data_loader in data_loaders.items():
+        max_batches = int(2000 / batch_size)
         d[phase] = torch.Tensor(
-            vae_model.estimate_log_likelihood_dataset(data_loader, n_samples=n_iw_samples))
+            vae_model.estimate_log_likelihood_dataset(data_loader, max_batches=max_batches, n_samples=n_iw_samples))
         print("data", phase, "shape", d[phase].shape)
     print("Saving surprisal stats data")
     torch.save(d, surprisal_data_file)
@@ -392,11 +414,17 @@ def surprisal_samples(sample_file, surprisal_sample_file, vae_model, batch_size_
     torch.save(surprisal_samples, surprisal_sample_file)
 
 
-def gather_surprisal_stats(device="cuda:0", include_train=True, batch_size_surprisal=100, n_iw_samples=50):
+def gather_surprisal_stats(device="cuda:0", include_train=True, batch_size_surprisal=100, n_iw_samples=50, reverse=False):
     data_loaders = get_test_validation_loader(image_dataset_name="bmnist", include_train=include_train,
                                               batch_size=batch_size_surprisal, num_workers=3)
+    run_names = list(os.listdir(ANALYSIS_DIR))
 
-    for i, run_name in enumerate(os.listdir(ANALYSIS_DIR)):
+    if reverse:
+        run_names.reverse()
+
+    for i, run_name in enumerate(run_names):
+        if run_name == "data_group":
+            continue
         if os.path.isfile(f"{ANALYSIS_DIR}/{run_name}"):
             continue
 
@@ -458,7 +486,7 @@ def gather_surprisal_stats(device="cuda:0", include_train=True, batch_size_surpr
         if not done_surprisal_data:
             with torch.no_grad():
                 surprisal_data(surprisal_data_file=surprisal_data_file, data_loaders=data_loaders,
-                               vae_model=vae_model, n_iw_samples=n_iw_samples)
+                               vae_model=vae_model, n_iw_samples=n_iw_samples, batch_size=batch_size_surprisal)
         else:
             print("did data already, skipping!")
 
@@ -730,10 +758,141 @@ def knn_prediction_distribution_stats(
         pickle.dump(res, open(knn_preds_stats_file, "wb"))
 
 
-def data_space_stats():
-    val_data_X, val_data_y = get_n_data_samples_x_y(image_dataset_name="bmnist", N_samples=1000, validation=True)
+def gather_avg_data_sample_per_class():
+    if not os.path.isfile(AVG_DATA_SAMPLE_FILE):
+        val_data_X, val_data_y = get_n_data_samples_x_y(image_dataset_name="bmnist", N_samples=9000, phase="valid")
+
+        avg_digits_X_flat = []
+
+        for i in range(10):
+            val_data_X_i = val_data_X[val_data_y == i].reshape(-1, 28 * 28).mean(dim=0)
+            avg_digits_X_flat.append(val_data_X_i)
+
+        # fig, axs = plt.subplots(ncols=5, nrows=2)
+        #
+        # for i in range(10):
+        #     row = i // 5
+        #     col = i % 5
+        #
+        #     im = axs[row, col].imshow(avg_digits_X_flat[i].reshape(28, 28), cmap="Greys")
+        #
+        # plt.colorbar(im)
+        # plt.show()
+
+        pickle.dump(avg_digits_X_flat, open(AVG_DATA_SAMPLE_FILE, "wb"))
+    else:
+        avg_digits_X_flat = pickle.load(open(AVG_DATA_SAMPLE_FILE, "rb"))
+
+    avg_digits_X_flat = torch.stack(avg_digits_X_flat, dim=0)
+    assert avg_digits_X_flat.shape[0] == 10, "gather_avg_data_sample_per_class: stacking went wrong, invalid shape"
+    return avg_digits_X_flat
+
+def data_space_collect_stats(x, preds, val_data_y, avg_digits_X_flat):
     uniform = td.Categorical(probs=torch.FloatTensor([0.1 for _ in range(10)]))
 
+    res = dict()
+
+    fracs = []
+    data_fracs = []
+    L2_all_classes = []
+    L0_all_classes = []
+    L2_all_data = []
+
+    data_x_i_avgs = []
+    x_i_avgs = []
+
+    L0_all = torch.flatten(x, start_dim=1).sum(dim=-1)
+
+    for i in range(10):
+        x_i = torch.flatten(x[preds == i], start_dim=1)
+
+        # val_data_x_i = torch.flatten(val_data_X[val_data_y == i], start_dim=1)
+
+        val_data_y_i = val_data_y[val_data_y == i]
+
+        pred_frac_i = len(x_i) / len(x)
+        val_data_frac_i = len(val_data_y_i) / len(val_data_y)
+
+        # val_data_x_i_avg = torch.mean(val_data_x_i, dim=0)
+
+        val_data_x_i_avg = avg_digits_X_flat[i, :]
+
+        x_i_avg = torch.mean(x_i, dim=0)
+
+        assert val_data_x_i_avg.shape == x_i_avg.shape, "avg data sample and avg sample must have same size " \
+                                                        "to compare "
+
+        data_x_i_avgs.append(val_data_x_i_avg)
+        x_i_avgs.append(x_i_avg)
+
+        L0_i = x_i.sum(-1).mean()
+        L0_all_classes.append(L0_i.item())
+
+        L2 = ((x_i - val_data_x_i_avg) ** 2).sum(dim=-1)
+        L2_all_data.append(L2)
+        L2_all_classes.append(L2.mean().item())
+
+        fracs.append(pred_frac_i)
+        data_fracs.append(val_data_frac_i)
+
+    L2_all_data = torch.cat(L2_all_data, dim=0)
+
+    sample_dist = td.Categorical(probs=torch.FloatTensor(fracs))
+    data_dist = td.Categorical(probs=torch.FloatTensor(data_fracs))
+
+    kl_div_sample_dist_from_uniform = td.kl_divergence(sample_dist, uniform).item()
+    kl_div_sample_dist_from_data_dist = td.kl_divergence(sample_dist, data_dist).item()
+
+    res["L0_avg"] = L0_all.mean().item()
+    res["L0_all"] = L0_all.tolist()
+    res["L0_avg_per_class"] = L0_all_classes
+
+    res["L2_avg"] = np.mean(L2_all_classes)
+    res["L2_avg_per_class"] = L2_all_classes
+    res["L2_all"] = L2_all_data.tolist()
+
+    res["KL_marg_sample_dist_data_dist"] = kl_div_sample_dist_from_data_dist
+    res["KL_marg_sample_dist_uniform"] = kl_div_sample_dist_from_uniform
+    res["marg_sample_dist"] = sample_dist
+
+    res["class_fracs"] = fracs
+    res["data_class_fracs"] = data_fracs
+    res["data_x_i_avgs"] = data_x_i_avgs
+    res["x_i_avgs"] = x_i_avgs
+
+    return res
+
+def data_space_stats():
+    val_data_X, val_data_y = get_n_data_samples_x_y(image_dataset_name="bmnist", N_samples=1000, phase="valid")
+
+    avg_digits_X_flat = gather_avg_data_sample_per_class()
+    # ------------------------------------------------------------
+    # Collect all the stats for the data group
+    save_dir = f"{ANALYSIS_DIR}/data_group"
+    os.makedirs(save_dir, exist_ok=True)
+    save_file = f"{save_dir}/{DATA_SPACE_STATS}"
+
+    if not os.path.isfile(save_file):
+        print("Collecting dataspace stats for the data samples, to form a data group in analysis!")
+
+        all_res = dict()
+
+        # Collect the stats for the data itself
+        for phase in ["train", "valid", "test"]:
+            print(phase)
+
+            x, preds = get_n_data_samples_x_y(image_dataset_name="bmnist", N_samples=1000, phase=phase)
+            res = data_space_collect_stats(x, preds, val_data_y, avg_digits_X_flat)
+
+            all_res[phase] = res
+
+        all_res["samples"] = all_res["test"]
+
+        print("Saving data space stats!")
+        pickle.dump(all_res, open(save_file, "wb"))
+
+    # ------------------------------------------------------------
+    # Collect the stats for all the runs
     for i, run_name in enumerate(os.listdir(ANALYSIS_DIR)):
         # Skip all that is not a directory
         if os.path.isfile(f"{ANALYSIS_DIR}/{run_name}"):
@@ -771,72 +930,7 @@ def data_space_stats():
             preds = knn_preds[phase]["preds"]
             assert len(preds) == len(x), "the predictions and samples are expected to be of the same length"
 
-            res = dict()
-
-            fracs = []
-            data_fracs = []
-            L2_all_classes = []
-            L0_all_classes = []
-            L2_all_data = []
-
-            data_x_i_avgs = []
-            x_i_avgs = []
-
-            L0_all = torch.flatten(x, start_dim=1).sum(dim=-1)
-
-            for i in range(10):
-                x_i = torch.flatten(x[preds == i], start_dim=1)
-                val_data_x_i = torch.flatten(val_data_X[val_data_y == i], start_dim=1)
-
-                val_data_y_i = val_data_y[val_data_y == i]
-
-                pred_frac_i = len(x_i) / len(x)
-                val_data_frac_i = len(val_data_y_i) / len(val_data_y)
-
-                val_data_x_i_avg = torch.mean(val_data_x_i, dim=0)
-                x_i_avg = torch.mean(x_i, dim=0)
-
-                assert val_data_x_i_avg.shape == x_i_avg.shape, "avg data sample and avg sample must have same size " \
-                                                                "to compare "
-
-                data_x_i_avgs.append(val_data_x_i_avg)
-                x_i_avgs.append(x_i_avg)
-
-                L0_i = x_i.sum(-1).mean()
-                L0_all_classes.append(L0_i.item())
-
-                L2 = ((x_i - val_data_x_i_avg) ** 2).sum(dim=-1)
-                L2_all_data.append(L2)
-                L2_all_classes.append(L2.mean().item())
-
-                fracs.append(pred_frac_i)
-                data_fracs.append(val_data_frac_i)
-
-            L2_all_data = torch.cat(L2_all_data, dim=0)
-
-            sample_dist = td.Categorical(probs=torch.FloatTensor(fracs))
-            data_dist = td.Categorical(probs=torch.FloatTensor(data_fracs))
-
-            kl_div_sample_dist_from_uniform = td.kl_divergence(sample_dist, uniform).item()
-            kl_div_sample_dist_from_data_dist = td.kl_divergence(sample_dist, data_dist).item()
-
-            res["L0_avg"] = L0_all.mean().item()
-            res["L0_all"] = L0_all.tolist()
-            res["L0_avg_per_class"] = L0_all_classes
-
-            res["L2_avg"] = np.mean(L2_all_classes)
-            res["L2_avg_per_class"] = L2_all_classes
-            res["L2_all"] = L2_all_data.tolist()
-
-            res["KL_marg_sample_dist_data_dist"] = kl_div_sample_dist_from_data_dist
-            res["KL_marg_sample_dist_uniform"] = kl_div_sample_dist_from_uniform
-            res["marg_sample_dist"] = sample_dist
-
-            res["class_fracs"] = fracs
-            res["data_class_fracs"] = data_fracs
-            res["data_x_i_avgs"] = data_x_i_avgs
-            res["x_i_avgs"] = x_i_avgs
-
+            res = data_space_collect_stats(x, preds, val_data_y, avg_digits_X_flat)
             all_results[phase] = res
 
         print("Saving data space stats!")

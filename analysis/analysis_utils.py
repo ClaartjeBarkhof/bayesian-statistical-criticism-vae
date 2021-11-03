@@ -32,15 +32,17 @@ def make_c_dict(unique_vals):
 
 # --------------------------------------------------------------------------------------
 # Data
-def get_n_data_samples_x_y(image_dataset_name="bmnist", N_samples=500, validation=True):
+def get_n_data_samples_x_y(image_dataset_name="bmnist", N_samples=500, phase="valid"):
     args = prepare_parser(jupyter=True, print_settings=False)
     args.image_dataset_name = image_dataset_name
     dataset = ImageDataset(args=args)
 
     data_X, data_y = [], []
 
-    if validation:
+    if phase == "valid":
         loader = dataset.valid_loader(num_workers=1, batch_size=100, shuffle=True)
+    elif phase == "train":
+        loader = dataset.train_loader(num_workers=1, batch_size=100, shuffle=True)
     else:
         loader = dataset.test_loader(num_workers=1, batch_size=100, shuffle=True)
 
@@ -65,9 +67,9 @@ def get_test_validation_loader(image_dataset_name="bmnist", batch_size=100, num_
     args.num_workers = num_workers
 
     dataset = ImageDataset(args=args)
-    data_loaders = dict(test=dataset.test_loader(shuffle=False),
-                        valid=dataset.valid_loader(shuffle=False))
+    data_loaders = dict(test=dataset.test_loader(shuffle=True),
+                        valid=dataset.valid_loader(shuffle=True))
     if include_train:
-        data_loaders["train"] = dataset.train_loader(batch_size=batch_size, shuffle=False)
+        data_loaders["train"] = dataset.train_loader(batch_size=batch_size, shuffle=True)
 
     return data_loaders
