@@ -760,6 +760,10 @@ class HierarchicalModel:
         self.obs_objective_group_id = df["objective_group_id"].values
         self.obs_experiment_group_id = df["experiment_group_id"].values
 
+        self.obs_decoder_group_name = df["decoder_group_name"].values
+        self.obs_objective_group_name = df["objective_group_name"].values
+        self.obs_experiment_group_name = df["experiment_group_name"].values
+
         self.G_dec = len(self.decoder_group_df)
         self.G_obj = len(self.objective_group_df)
         self.G_exp = len(self.experiment_group_df)
@@ -878,7 +882,7 @@ class HierarchicalModel:
             self.prior_predictive = Predictive(self.model, num_samples=num_prior_samples)
 
         # [num_prior_samples, N]: for every x take multiple prior samples
-        self.prior_predictions = self.prior_predictive(rng_key_, obs_x=self.obs_x, obs_g=self.obs_g, obs_y=None)
+        self.prior_predictions = self.prior_predictive(rng_key_, obs_y=None)
 
         return self.prior_predictions
 
@@ -889,7 +893,7 @@ class HierarchicalModel:
         if self.posterior_predictive is None:
             self.posterior_predictive = Predictive(self.model, self.posterior_samples)
 
-        self.posterior_predictions = self.posterior_predictive(rng_key_, obs_x=self.obs_x, obs_g=self.obs_g)
+        self.posterior_predictions = self.posterior_predictive(rng_key_)
 
         return self.posterior_predictions
 
@@ -914,7 +918,7 @@ class HierarchicalModel:
         self.plot_check()
 
         az.plot_forest(self.arviz_data, kind='forestplot', var_names=["decoder_group_bias"])
-        az.plot_forest(self.arviz_data, kind='forestplot', var_names=["objective_groups_plate"])
+        az.plot_forest(self.arviz_data, kind='forestplot', var_names=["objective_group_bias"])
         az.plot_forest(self.arviz_data, kind='forestplot', var_names=["experiment_group_bias"])
 
     def full_analysis(self, num_prior_samples=1000, prior_plots=True, posterior_plots=True, arviz_plots=True):
