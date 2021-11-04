@@ -694,14 +694,61 @@ def knn_prediction_distribution_stats(
         knn_data_pred_path="/home/cbarkhof/fall-2021/analysis/analysis-files/KNN_data_probas.p"):
     knn_data_pred = pickle.load(open(knn_data_pred_path, "rb"))
 
-    print("TEST", knn_data_pred.keys())
-
     uniform = td.Categorical(probs=torch.FloatTensor([0.1 for _ in range(10)]))
+
     marg_test_data = td.Categorical(probs=torch.FloatTensor(knn_data_pred["test"]["marg"]))
     marg_valid_data = td.Categorical(probs=torch.FloatTensor(knn_data_pred["valid"]["marg"]))
     marg_train_data = td.Categorical(probs=torch.FloatTensor(knn_data_pred["train"]["marg"]))
 
     marginals_data = dict(test=marg_test_data, valid=marg_valid_data, train=marg_train_data)
+
+    # DATA GROUP
+    save_dir = f"{ANALYSIS_DIR}/data_group"
+    knn_preds_stats_file = f"{save_dir}/{KNN_PREDICT_STATS_FILE}"
+
+    if not os.path.isfile(knn_preds_stats_file):
+
+        instance_dist_test_data = td.Categorical(probs=torch.FloatTensor(knn_data_pred["test"]["proba"]))
+        instance_dist_valid_data = td.Categorical(probs=torch.FloatTensor(knn_data_pred["valid"]["proba"]))
+        instance_dist_train_data = td.Categorical(probs=torch.FloatTensor(knn_data_pred["train"]["proba"]))
+
+        train_data_kl_instance_marg = td.kl_divergence(instance_dist_train_data, marg_train_data)
+        valid_data_kl_instance_marg = td.kl_divergence(instance_dist_valid_data, marg_valid_data)
+        test_data_kl_instance_marg = td.kl_divergence(instance_dist_test_data, marg_test_data)
+
+        train_kl_marg_uniform = td.kl_divergence(marg_train_data, uniform)
+        valid_kl_marg_uniform = td.kl_divergence(marg_valid_data, uniform)
+        test_kl_marg_uniform = td.kl_divergence(marg_test_data, uniform)
+
+        # this should be zero of course
+        train_kl_marg_marg_data = td.kl_divergence(marg_train_data, marg_train_data)
+        valid_kl_marg_marg_data = td.kl_divergence(marg_valid_data, marg_valid_data)
+        test_kl_marg_marg_data = td.kl_divergence(marg_test_data, marg_test_data)
+
+        res = dict()
+        res['train'] = dict(kl_instance_marg_pred=train_data_kl_instance_marg.tolist(),
+                            kl_instance_marg_pred_mean=train_data_kl_instance_marg.mean().item(),
+                            kl_marg_uniform=train_kl_marg_uniform.tolist(),
+                            kl_marg_uniform_mean=train_kl_marg_uniform.mean().item(),
+                            kl_marg_marg_data=train_kl_marg_marg_data.tolist(),
+                            kl_marg_marg_data_mean=train_kl_marg_marg_data.mean().item())
+
+        res['valid'] = dict(kl_instance_marg_pred=valid_data_kl_instance_marg.tolist(),
+                            kl_instance_marg_pred_mean=valid_data_kl_instance_marg.mean().item(),
+                            kl_marg_uniform=valid_kl_marg_uniform.tolist(),
+                            kl_marg_uniform_mean=valid_kl_marg_uniform.mean().item(),
+                            kl_marg_marg_data=valid_kl_marg_marg_data.tolist(),
+                            kl_marg_marg_data_mean=valid_kl_marg_marg_data.mean().item())
+
+        res['test'] = dict(kl_instance_marg_pred=test_data_kl_instance_marg.tolist(),
+                            kl_instance_marg_pred_mean=test_data_kl_instance_marg.mean().item(),
+                            kl_marg_uniform=test_kl_marg_uniform.tolist(),
+                            kl_marg_uniform_mean=test_kl_marg_uniform.mean().item(),
+                            kl_marg_marg_data=test_kl_marg_marg_data.tolist(),
+                            kl_marg_marg_data_mean=test_kl_marg_marg_data.mean().item())
+
+        print("DATAGROUP: Saving KNN stats!")
+        pickle.dump(res, open(knn_preds_stats_file, "wb"))
 
     for i, run_name in enumerate(os.listdir(ANALYSIS_DIR)):
         if os.path.isfile(f"{ANALYSIS_DIR}/{run_name}"):
@@ -712,6 +759,7 @@ def knn_prediction_distribution_stats(
         if not (os.path.isfile(f"{save_dir}/{KNN_PREDICT_RECONSTRUCTIONS_FILE}") or
                 os.path.isfile(f"{save_dir}/{KNN_PREDICT_SAMPLES_FILE}")):
             print("No KNN predictions yet. Run knn_predictions_for_samples_reconstructions")
+            print(save_dir)
             continue
 
         knn_preds_recon = pickle.load(open(f"{save_dir}/{KNN_PREDICT_RECONSTRUCTIONS_FILE}", "rb"))
@@ -730,7 +778,7 @@ def knn_prediction_distribution_stats(
         # Some measurements over marginal prediction distribution versus instance prediciton distributions
         # phase: preds, proba, marg
         for phase in ["test", "valid", "samples"]:
-            if phase == "test" or phase == "valid":
+            if phase != "samples":
                 instance_dists = td.Categorical(probs=torch.FloatTensor(knn_preds_recon[phase]["proba"]))
                 marginal_pred = td.Categorical(probs=torch.FloatTensor(knn_preds_recon[phase]["marg"]))
             else:

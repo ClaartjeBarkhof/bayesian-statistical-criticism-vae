@@ -159,71 +159,6 @@ class NumpyroGLM:
 
             numpyro.sample("obs", dist_y, obs=obs_y)
 
-    def hierarchical_model(self, obs_x=None, obs_y=None):
-        # GLOBAL BIAS
-        global_bias = numpyro.sample(
-            "global_bias",
-            dist.Laplace(
-                np.zeros(1),
-                np.ones(1) / 2.
-            )
-        )
-
-        # DECODER GROUP BIAS
-        with numpyro.plate("decoder_groups_plate", ...):
-            decoder_group_bias = numpyro.sample(
-                "decoder_group_bias",
-                dist.Laplace(
-                    0.0,
-                    1. / 2.
-                )
-            )
-
-        # OBJECTIVE GROUP BIAS
-        with numpyro.plate("objective_groups_plate", ...):
-            objective_group_bias = numpyro.sample(
-                "objective_group_bias",
-                dist.Laplace(
-                    0.0,
-                    1. / 2.
-                )
-            )
-
-        # EXPERIMENT GROUP BIAS
-        with numpyro.plate("experiment_groups_plate", ...):
-            experiment_group_bias = numpyro.sample(
-                "experiment_group_bias",
-                dist.Laplace(
-                    0.0,
-                    1. / 2.
-                )
-            )
-
-            if "normal" in self.obs_dist:
-                normal_scale = numpyro.sample("normal_scale", dist.Uniform(low=0.1, high=10.0))
-            elif self.obs_dist == "student_t":
-                # See section 15.2 of https://jrnold.github.io/bayesian_notes/robust-regression.html:
-                student_scale = numpyro.sample("student_scale", dist.Gamma(concentration=2.0, rate=0.1))
-                student_df = numpyro.sample("student_df", dist.Exponential(rate=1.0 / 10.0))
-            else:
-                normal_scale, student_scale, student_df = 0.0, 0.0, 0.0
-
-        eta = global_bias + decoder_group_bias[...] + objective_group_bias[...] + experiment_group_bias[...]
-
-        with numpyro.plate("data", self.N):
-            if self.obs_dist == "binomial":
-                dist_y = dist.Binomial(self.total_count, logits=eta)
-            elif self.obs_dist == "student_t":
-                dist_y = dist.StudentT(df=student_df[self.obs_g], loc=eta, scale=student_scale[self.obs_g])
-            elif self.obs_dist == "log_normal":
-                dist_y = dist.LogNormal(loc=eta, scale=normal_scale[self.obs_g])
-            elif self.obs_dist == "normal":
-                dist_y = dist.Normal(loc=eta, scale=normal_scale[self.obs_g])
-            elif self.obs_dist == "truncated_normal":
-                dist_y = dist.TruncatedNormal(low=0.0, loc=eta, scale=normal_scale[self.obs_g])
-
-            numpyro.sample("obs", dist_y, obs=obs_y)
-
     def plot_correlations(self):
         cols = [self.obs_y_name] + self.obs_x_list + ["group_name"]
         sns.pairplot(self.df[cols], hue="group_name")
@@ -719,8 +654,10 @@ class NumpyroGLM:
 
 
 class HierarchicalModel:
-    def __init__(self, df, obs_y_name, obs_dist="binomial",
+    def __init__(self, df, obs_y_name, obs_y_data=None, obs_dist="binomial", flat=False,
                  num_samples=1000, num_warmup=1000, num_chains=3, inverse_data_transform=None):
+
+        self.flat = flat
 
         self.df = df
 
@@ -728,6 +665,7 @@ class HierarchicalModel:
         self.experiment_names = list(df["clean_name"].values)
         self.objective_names = list(df["objective"].values)
 
+        # Add indicators for the data group
         self.df, self.decoder_group_df = create_group_df(self.df, ["decoder"], group_id_col="decoder_group_id",
                                                          group_name_col="decoder_group_name")
         self.df, self.objective_group_df = create_group_df(self.df, ["objective"], group_id_col="objective_group_id",
@@ -743,7 +681,10 @@ class HierarchicalModel:
 
         self.obs_dist = obs_dist
 
-        self.var_names = ["global_bias", "decoder_group_bias", "objective_group_bias", "experiment_group_bias"]
+        if self.flat:
+            self.var_names = ["global_bias", "decoder_group_bias", "objective_group_bias", "experiment_group_bias"]
+        else:
+            self.var_names = ["global_bias", "decoder_objective_group_bias", "experiment_group_bias"]
 
         if self.obs_dist == "student_t":
             self.var_names += ["student_scale", "student_df"]
@@ -756,6 +697,19 @@ class HierarchicalModel:
 
         self.obs_y = df[obs_y_name].values
 
+        self.add_data_group = False if obs_y_data is None else True
+        self.obs_y_data = obs_y_data
+        self.obs_y_all = self.obs_y
+
+        if self.add_data_group:
+            self.obs_y_all = np.concatenate([self.obs_y_all, self.obs_y_data])
+
+        # data group indicator, 0 is non-data group, 1 is data group
+        self.data_group_id = np.ones_like(self.obs_y_all)
+        if self.add_data_group:
+            # set the non-data elements to 0
+            self.data_group_id[:len(self.obs_y)] = 0
+
         self.obs_decoder_group_id = df["decoder_group_id"].values
         self.obs_objective_group_id = df["objective_group_id"].values
         self.obs_experiment_group_id = df["experiment_group_id"].values
@@ -767,7 +721,10 @@ class HierarchicalModel:
         self.G_dec = len(self.decoder_group_df)
         self.G_obj = len(self.objective_group_df)
         self.G_exp = len(self.experiment_group_df)
+
         self.N = len(self.df)
+        if self.add_data_group:
+            self.N += len(obs_y_data)
 
         self.total_count = 28 * 28
         self.rng_key = random.PRNGKey(0)
@@ -789,68 +746,99 @@ class HierarchicalModel:
         self.print_init()
 
     def model(self, obs_y=None):
-        # GLOBAL BIAS
-        global_bias = numpyro.sample(
-            "global_bias",
-            dist.Laplace(
-                np.zeros(1),
-                np.ones(1) / 2.
-            )
-        )
+        if obs_y is not None:
+            assert len(obs_y) == len(self.obs_y_all), f"len(obs_y) =!= len(obs_y_all) {len(obs_y)} =!= {len(self.obs_y_all)}"
 
-        # DECODER GROUP BIAS
-        with numpyro.plate("decoder_groups_plate", self.G_dec):
-            decoder_group_bias = numpyro.sample(
-                "decoder_group_bias",
-                dist.Laplace(
-                    0.0,
-                    1. / 2.
-                )
-            )
+        # GLOBAL LEVEL
+        # BIAS
 
-        # OBJECTIVE GROUP BIAS
-        with numpyro.plate("objective_groups_plate", self.G_obj):
-            objective_group_bias = numpyro.sample(
-                "objective_group_bias",
-                dist.Laplace(
-                    0.0,
-                    1. / 2.
-                )
-            )
+        global_bias = numpyro.sample("global_bias", dist.Normal(0.0, 1.))
 
-        # EXPERIMENT GROUP BIAS
-        with numpyro.plate("experiment_groups_plate", self.G_exp):
-            experiment_group_bias = numpyro.sample(
-                "experiment_group_bias",
-                dist.Laplace(
-                    0.0,
-                    1. / 2.
-                )
-            )
+        # TODO: inform this with population mean?
+        # [2]
+        with numpyro.plate("data_model_global_plate", 2):
+            data_model_bias = numpyro.sample("data_model_bias", dist.Normal(global_bias, 1.))
 
-            if "normal" in self.obs_dist:
-                normal_scale = numpyro.sample("normal_scale", dist.Uniform(low=0.1, high=10.0))
-            elif self.obs_dist == "student_t":
-                # See section 15.2 of https://jrnold.github.io/bayesian_notes/robust-regression.html:
-                student_scale = numpyro.sample("student_scale", dist.Gamma(concentration=2.0, rate=0.1))
-                student_df = numpyro.sample("student_df", dist.Exponential(rate=1.0 / 10.0))
-            else:
-                normal_scale, student_scale, student_df = 0.0, 0.0, 0.0
+        model_global_bias = data_model_bias[0]
+        data_global_bias = data_model_bias[1]
 
-        eta = global_bias + decoder_group_bias[self.obs_decoder_group_id] + \
-              objective_group_bias[self.obs_objective_group_id] + experiment_group_bias[self.obs_experiment_group_id]
+        # SCALE and/or DF
+        normal_scale, student_scale, student_df = 0.0, 0.0, 0.0
 
+        if "normal" in self.obs_dist:
+            normal_scale = numpyro.sample("normal_scale", dist.Uniform(low=0.1, high=10.0))
+
+        elif self.obs_dist == "student_t":
+            # See section 15.2 of https://jrnold.github.io/bayesian_notes/robust-regression.html:
+            student_scale = numpyro.sample("student_scale", dist.Gamma(concentration=2.0, rate=0.1))
+            student_df = numpyro.sample("student_df", dist.Exponential(rate=1.0 / 10.0))
+
+        if self.flat:
+            pass
+            # # DECODER GROUP BIAS [G_dec]
+            # with numpyro.plate("decoder_groups_plate", self.G_dec):
+            #     decoder_group_bias = numpyro.sample("decoder_group_bias", dist.Normal(0.0, 1.))
+            #
+            # # OBJECTIVE GROUP BIAS [G_obj]
+            # with numpyro.plate("objective_groups_plate", self.G_obj):
+            #     objective_group_bias = numpyro.sample("objective_group_bias", dist.Normal(0.0, 1.))
+            #
+            # # EXPERIMENT GROUP BIAS [G_exp]
+            # with numpyro.plate("experiment_groups_plate", self.G_exp):
+            #     experiment_group_bias = numpyro.sample("experiment_group_bias", dist.Normal(0.0, 1.0))
+            #
+            # bias_model_groups = global_bias + decoder_group_bias[self.obs_decoder_group_id] + \
+            #       objective_group_bias[self.obs_objective_group_id] + experiment_group_bias[
+            #           self.obs_experiment_group_id]
+
+        # HIERARCHICAL
+        else:
+            # DECODER GROUP BIAS [G_dec]
+            with numpyro.plate("decoder_groups_plate", self.G_dec):
+                decoder_group_bias = numpyro.sample("decoder_group_bias", dist.Normal(model_global_bias, 1.))
+
+            # DECODER-OBJECTIVE GROUP BIAS [G_obj, G_dec]
+            with numpyro.plate("decoder_groups_plate", self.G_dec):
+                with numpyro.plate("objective_groups_plate", self.G_obj):
+                    decoder_objective_group_bias = numpyro.sample("decoder_objective_group_bias",
+                                                                  dist.Normal(decoder_group_bias,
+                                                                              jnp.ones_like(decoder_group_bias)))
+
+            # EXPERIMENT GROUP BIAS [G_exp]
+            with numpyro.plate("experiment_groups_plate", self.G_exp):
+                # I need a double indexer of length G_exp that indexes the
+                # objective idx, decoder idx of those experiments
+                obj_idx_dec_idx = self.df[["decoder_group_id", "objective_group_id", "experiment_group_id"]].drop_duplicates().sort_values("experiment_group_id")[["objective_group_id", "decoder_group_id"]].values
+
+                experiment_means = jnp.array(decoder_objective_group_bias[obj_idx_dec_idx[:, 0], obj_idx_dec_idx[:, 1]])
+                experiment_group_bias = numpyro.sample("experiment_group_bias",
+                                                       dist.Normal(experiment_means,
+                                                                   jnp.ones_like(experiment_means)))
+
+            # Add up all the biases
+            bias_model_groups = experiment_group_bias[self.obs_experiment_group_id]
+
+        # For all add the global bias
+        bias_data_group = jnp.ones((self.data_group_id == 1).sum()) * data_global_bias
+
+        # For only the NON-data group add the group-objective-experiment specific biases
+        # (not sure if in place operations would be accepted)
+        bias_all = jnp.concatenate([bias_model_groups, bias_data_group])
+
+        assert len(bias_all) == len(self.data_group_id), "length bias all incorrect"
+
+        # Sample y
         with numpyro.plate("data", self.N):
             if self.obs_dist == "binomial":
-                dist_y = dist.Binomial(self.total_count, logits=eta)
+                dist_y = dist.Binomial(self.total_count, logits=bias_all)
             elif self.obs_dist == "student_t":
-                dist_y = dist.StudentT(df=student_df[self.obs_experiment_group_id], loc=eta, scale=student_scale[self.obs_experiment_group_id])
+                dist_y = dist.StudentT(df=student_df, loc=bias_all, scale=student_scale)
             elif self.obs_dist == "log_normal":
-                dist_y = dist.LogNormal(loc=eta, scale=normal_scale[self.obs_experiment_group_id])
+                dist_y = dist.LogNormal(loc=bias_all, scale=normal_scale)
             elif self.obs_dist == "normal":
-                dist_y = dist.Normal(loc=eta, scale=normal_scale[self.obs_experiment_group_id])
+                dist_y = dist.Normal(loc=bias_all, scale=normal_scale)
             elif self.obs_dist == "truncated_normal":
-                dist_y = dist.TruncatedNormal(low=0.0, loc=eta, scale=normal_scale[self.obs_experiment_group_id])
+                dist_y = dist.TruncatedNormal(low=0.0, loc=bias_all, scale=normal_scale)
 
             numpyro.sample("obs", dist_y, obs=obs_y)
 
@@ -866,7 +854,7 @@ class HierarchicalModel:
             assert name in self.df.columns, f"{name} must be present in columns to group by"
 
     def run(self):
-        self.mcmc.run(self.rng_key, obs_y=self.obs_y)
+        self.mcmc.run(self.rng_key, obs_y=self.obs_y_all)
         self.run_bool = True
         self.mcmc.print_summary()
         # group_by_chain=False: [K*D, ...]
@@ -917,9 +905,13 @@ class HierarchicalModel:
     def plot_group_bias(self):
         self.plot_check()
 
-        az.plot_forest(self.arviz_data, kind='forestplot', var_names=["decoder_group_bias"])
-        az.plot_forest(self.arviz_data, kind='forestplot', var_names=["objective_group_bias"])
-        az.plot_forest(self.arviz_data, kind='forestplot', var_names=["experiment_group_bias"])
+        if self.flat:
+            az.plot_forest(self.arviz_data, kind='forestplot', var_names=["decoder_group_bias"])
+            az.plot_forest(self.arviz_data, kind='forestplot', var_names=["objective_group_bias"])
+            az.plot_forest(self.arviz_data, kind='forestplot', var_names=["experiment_group_bias"])
+        else:
+            az.plot_forest(self.arviz_data, kind='forestplot', var_names=["decoder_objective_group_bias"])
+            az.plot_forest(self.arviz_data, kind='forestplot', var_names=["experiment_group_bias"])
 
     def full_analysis(self, num_prior_samples=1000, prior_plots=True, posterior_plots=True, arviz_plots=True):
 
@@ -934,8 +926,8 @@ class HierarchicalModel:
             predictive_checks(self, prior=False)
 
         if arviz_plots:
-            self.plot_trace()
-            self.plot_posterior()
+            # self.plot_trace()
+            # self.plot_posterior()
             self.plot_group_bias()
 
 
