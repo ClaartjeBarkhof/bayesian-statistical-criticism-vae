@@ -11,7 +11,7 @@ import torch.distributions as td
 
 import pyro
 
-from analysis.bda.probabll.bda import Family, MixedMembershipRD, Plotting
+from analysis.Pyro_BDA.probabll.bda import Family, MixedMembershipRD, Plotting
 
 class MixedMembershipLatentAnalysis:
     def __init__(self, run_names, clean_names=None, data_X=None, device="cuda:0", seed=0, num_components=6,

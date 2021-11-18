@@ -60,9 +60,9 @@ run_df = make_run_overview_df(prefixes=prefixes)
 
 # ------------------------------------------------------------------------------------------------
 # Step 1: Encode, reconstruct, sample
-# encode_reconstruct_sample(run_df, device=DEVICE, include_train=True,
-#                           n_sample_batches=N_SAMPLE_BATCHES,
-#                           sample_batch_size=SAMPLE_BATCH_SIZE, reverse=REVERSE)
+encode_reconstruct_sample(run_df, device=DEVICE, include_train=True,
+                          n_sample_batches=N_SAMPLE_BATCHES,
+                          sample_batch_size=SAMPLE_BATCH_SIZE, reverse=REVERSE)
 
 # ------------------------------------------------------------------------------------------------
 # Step 2: Gather surprisal stats

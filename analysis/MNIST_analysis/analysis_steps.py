@@ -43,16 +43,19 @@ CHECKPOINT_DIR = f"{CODE_DIR}/run_files/checkpoints"
 
 ENCODE_RECONSTUCT_FILE = f"encode-reconstruct-test-valid.pt"
 SAMPLE_FILE = f"generative-samples.pt"
+CONDITIONAL_SAMPLE_FILE = f"generative-conditional-samples.pt"
 
 AVG_DATA_SAMPLE_FILE = f"{CODE_DIR}/analysis/analysis-files/average_val_data_samples_per_class.p"
 
 SURPRISAL_RECONSTRUCT_FILE = "surprisal_reconstruct.pt"
 SURPRISAL_SAMPLE_FILE = "surprisal_sample.pt"
 SURPRISAL_DATA_FILE = "surprisal_data.pt"
+SURPRISAL_COND_SAMPLE_FILE = "surprisal_conditional_sample.pt"
 
 TEST_VALID_EVAL_FILE = "test-valid-results.pt"
 
 KNN_PREDICT_SAMPLES_FILE = "knn-preds-generative-samples.pickle"
+KNN_PREDICT_CONDITIONAL_SAMPLES_FILE = "knn-preds-conditional-generative-samples.pickle"
 KNN_PREDICT_RECONSTRUCTIONS_FILE = "knn-preds-reconstructions.pickle"
 
 KNN_PREDICT_STATS_FILE = "knn-preds-stats.pickle"
@@ -147,9 +150,10 @@ def make_run_overview_df(prefixes, add_data_group=False):
 def overview_of_missing_analysis(df):
     all_missing = dict()
 
-    missing = dict(dir=True, surprisal_recon=True, surprisal_data=True, surprisal_samples=True,
-                   encode=True, samples=True, test_valid_eval=True, knn_predict_samples=True,
-                   knn_predict_recons=True, knn_predict_stats=True, data_space_stats=True)
+    missing = {'dir': True, 'surprisal_recon': True, 'surprisal_data': True, 'surprisal_samples': True,
+               'surprisal_cond_samples': True, 'encode': True, 'samples': True, 'cond_samples': True,
+               'test_valid_eval': True, 'knn_predict_samples': True, 'knn_predict_cond_samples': True,
+               'knn_predict_recons': True, 'knn_predict_stats': True, 'data_space_stats': True}
 
     for run_name in df["run_name"].values:
         save_dir = f"{ANALYSIS_DIR}/{run_name}"
@@ -168,6 +172,8 @@ def overview_of_missing_analysis(df):
             missing_run["encode"] = False
         if os.path.isfile(f"{save_dir}/{SAMPLE_FILE}"):
             missing_run["samples"] = False
+        if os.path.isfile(f"{save_dir}/{CONDITIONAL_SAMPLE_FILE}"):
+            missing_run["cond_samples"] = False
 
         # TEST / VALID SIMPLE EVAL
         if os.path.isfile(f"{save_dir}/{TEST_VALID_EVAL_FILE}"):
@@ -180,12 +186,16 @@ def overview_of_missing_analysis(df):
             missing_run["surprisal_samples"] = False
         if os.path.isfile(f"{save_dir}/{SURPRISAL_RECONSTRUCT_FILE}"):
             missing_run["surprisal_recon"] = False
+        if os.path.isfile(f"{save_dir}/{SURPRISAL_COND_SAMPLE_FILE}"):
+            missing_run["surprisal_cond_samples"] = False
 
         # KNN PREDS
         if os.path.isfile(f"{save_dir}/{KNN_PREDICT_SAMPLES_FILE}"):
             missing_run["knn_predict_samples"] = False
         if os.path.isfile(f"{save_dir}/{KNN_PREDICT_RECONSTRUCTIONS_FILE}"):
             missing_run["knn_predict_recons"] = False
+        if os.path.isfile(f"{save_dir}/{KNN_PREDICT_CONDITIONAL_SAMPLES_FILE}"):
+            missing_run["knn_predict_cond_samples"] = False
         if os.path.isfile(f"{save_dir}/{KNN_PREDICT_STATS_FILE}"):
             missing_run["knn_predict_stats"] = False
 
@@ -262,6 +272,59 @@ def encode_reconstruct(data_loaders, vae_model, device, encode_reconstruct_file,
     torch.save(encode_reconstruct_d, encode_reconstruct_file)
 
 
+def conditional_sample(data_loaders, vae_model, device, conditional_sample_file, n_sample_batches=10, include_train=True):
+    phases = ["train", "valid", "test"] if include_train else ["test", "valid"]
+    conditional_sample_d = {phase: dict(z=[], mean=[], scale=[], cond_sample_x=[],
+                                        original_x=[], original_y=[]) for phase in phases}
+
+    for phase, data_loader in data_loaders.items():
+        for i, (x_in, y) in enumerate(data_loader):
+            print(f"{phase} {i}/{len(data_loader)}", end="\r")
+
+            x_in = x_in.to(device)
+
+            # Do a encode and reconstruct
+            # Infer the approximate posterior q(z|x) and sample from it to obtain z_post
+            # [B, D], [S, B, D]
+            q_z_x, z_post = vae_model.inf_model(x_in=x_in, n_samples=1)
+
+            if isinstance(q_z_x, td.Independent):
+                mean, scale = q_z_x.base_dist.loc, q_z_x.base_dist.scale
+
+            elif isinstance(q_z_x, AutoRegressiveDistribution):
+                (mean, scale) = q_z_x.params
+
+            # Normal normal
+            else:
+                mean, scale = q_z_x.loc, q_z_x.scale
+
+            # mean, scale: B, D
+            # z_post: S, B, D = 1, B, D
+            conditional_sample_d[phase]["z"].append(z_post.squeeze(0))
+            conditional_sample_d[phase]["mean"].append(mean)
+            conditional_sample_d[phase]["scale"].append(scale)
+
+            # Conditional sampling
+            # [Sx, Sz, B, C, W, H] -> [B, C, W, H]
+            conditional_sample_x = vae_model.gen_model.sample_generative_model(z=z_post,
+                                                                               Sx=1, Sz=1, return_z=False,
+                                                                               device="cuda:0").squeeze(0).squeeze(0)
+            conditional_sample_d[phase]["cond_sample_x"].append(conditional_sample_x)
+            conditional_sample_d[phase]["original_x"].append(x_in)
+            conditional_sample_d[phase]["original_y"].append(y)
+
+            if i + 1 == n_sample_batches:
+                break
+
+    # Cat
+    for phase in phases:
+        for key in ["z", "mean", "scale", "cond_sample_x", "original_x", "original_y"]:
+            conditional_sample_d[phase][key] = torch.cat(conditional_sample_d[phase][key], dim=0).cpu()
+
+    print("Saving conditonal samplings!")
+    torch.save(conditional_sample_d, conditional_sample_file)
+
+
 def sample(vae_model, n_sample_batches, device, sample_batch_size, sample_file):
     samples = dict(z=[], x=[])
 
@@ -290,8 +353,9 @@ def encode_reconstruct_sample(df, device="cuda:0", include_train=True, n_sample_
                               sample_batch_size=100, reverse=False):
     assert "run_name" in df.columns, "encode_reconstruct_sample: the DF must have a run_name column"
 
+    batch_size = 100
     data_loaders = get_test_validation_loader(image_dataset_name="bmnist",
-                                              batch_size=100, num_workers=3, include_train=include_train)
+                                              batch_size=batch_size, num_workers=3, include_train=include_train)
 
     run_names = list(df["run_name"].values)
     if reverse:
@@ -307,9 +371,10 @@ def encode_reconstruct_sample(df, device="cuda:0", include_train=True, n_sample_
         save_dir = f"{ANALYSIS_DIR}/{run_name}"
         os.makedirs(save_dir, exist_ok=True)
         encode_reconstruct_file = f"{save_dir}/{ENCODE_RECONSTUCT_FILE}"
+        conditional_sample_file = f"{save_dir}/{CONDITIONAL_SAMPLE_FILE}"
         sample_file = f"{save_dir}/{SAMPLE_FILE}"
 
-        done_encode, done_sample = False, False
+        done_encode, done_sample, done_cond_sample = False, False, False
 
         if os.path.isfile(encode_reconstruct_file):
             if "train" in torch.load(encode_reconstruct_file):
@@ -318,7 +383,10 @@ def encode_reconstruct_sample(df, device="cuda:0", include_train=True, n_sample_
         if os.path.isfile(sample_file):
             done_sample = True
 
-        if done_encode and done_sample:
+        # if os.path.isfile(conditional_sample_file):
+        #     done_cond_sample = True
+
+        if done_encode and done_sample and done_cond_sample:
             print("Done this run already, continue")
             continue
 
@@ -336,6 +404,14 @@ def encode_reconstruct_sample(df, device="cuda:0", include_train=True, n_sample_
             with torch.no_grad():
                 sample(vae_model=vae_model, n_sample_batches=n_sample_batches, device=device,
                        sample_batch_size=sample_batch_size, sample_file=sample_file)
+
+        # CONDITIONAL SAMPLE
+        if not done_cond_sample:
+            print(i, f"conditional sampling start: {n_sample_batches} x {batch_size} = {n_sample_batches*batch_size} samples")
+            with torch.no_grad():
+                conditional_sample(data_loaders=data_loaders, vae_model=vae_model, device=device,
+                                   n_sample_batches=n_sample_batches, conditional_sample_file=conditional_sample_file,
+                                   include_train=include_train)
 
 
 # -------------------------------------------------------------------------------------------------------------------
@@ -376,6 +452,42 @@ def surprisal_reconstructions(reconstruct_file, surprisal_reconstruct_file, vae_
     torch.save(surprisal_reconstruct, surprisal_reconstruct_file)
 
 
+def surprisal_conditional_generation(conditional_sample_file, surprisal_conditional_sample_file, vae_model,
+                                     batch_size_surprisal, n_iw_samples, device):
+    print("Conditional generation - conditional sampling")
+
+    print(f"BATCH SIZE {batch_size_surprisal}, N SAMPLES {n_iw_samples}")
+
+    surprisal_cond_sample = dict()
+    rec_dict = torch.load(conditional_sample_file)
+
+    for phase in ['valid', 'test', 'train']:
+        # [N, 1, 28, 28]
+        cond_sample_loader = DataLoader(TensorDataset(rec_dict[phase]["cond_sample_x"]),
+                                        batch_size=batch_size_surprisal, shuffle=True)
+        iw_ll_cond_sample = []
+        counter = 0
+        for i, x_in in enumerate(cond_sample_loader):
+            print(f"... calculating importance weighted (n_samples={n_iw_samples})"
+                  f" log likelihood {i:3d}/{len(cond_sample_loader)}", end="\r")
+
+            x_in = x_in[0].to(device)
+
+            iw_ll = vae_model.estimate_log_likelihood_batch(x_in, n_samples=n_iw_samples, per_bit=False)
+            iw_ll_cond_sample.append(iw_ll)
+            counter += x_in.shape[0]
+
+            # we don't need it all
+            if counter > 2000:
+                break
+
+        surprisal_cond_sample[phase] = torch.cat(iw_ll_cond_sample).cpu()
+        print("reconstruct", phase, "shape", surprisal_cond_sample[phase].shape)
+
+    print("Saving surprisal stats conditional samples")
+    torch.save(surprisal_cond_sample, surprisal_conditional_sample_file)
+
+
 def surprisal_data(surprisal_data_file, data_loaders, vae_model, n_iw_samples, batch_size=30):
     print("Data")
     d = dict()
@@ -414,7 +526,8 @@ def surprisal_samples(sample_file, surprisal_sample_file, vae_model, batch_size_
     torch.save(surprisal_samples, surprisal_sample_file)
 
 
-def gather_surprisal_stats(device="cuda:0", include_train=True, batch_size_surprisal=100, n_iw_samples=50, reverse=False):
+def gather_surprisal_stats(device="cuda:0", include_train=True, batch_size_surprisal=100, n_iw_samples=50,
+                           reverse=False):
     data_loaders = get_test_validation_loader(image_dataset_name="bmnist", include_train=include_train,
                                               batch_size=batch_size_surprisal, num_workers=3)
     run_names = list(os.listdir(ANALYSIS_DIR))
@@ -438,18 +551,20 @@ def gather_surprisal_stats(device="cuda:0", include_train=True, batch_size_surpr
 
         reconstruct_file = f"{save_dir}/{ENCODE_RECONSTUCT_FILE}"
         sample_file = f"{save_dir}/{SAMPLE_FILE}"
+        cond_sample_file = f"{save_dir}/{CONDITIONAL_SAMPLE_FILE}"
 
         surprisal_reconstruct_file = f"{save_dir}/{SURPRISAL_RECONSTRUCT_FILE}"
         surprisal_sample_file = f"{save_dir}/{SURPRISAL_SAMPLE_FILE}"
         surprisal_data_file = f"{save_dir}/{SURPRISAL_DATA_FILE}"
+        surprisal_conditional_sample_file = f"{save_dir}/{SURPRISAL_COND_SAMPLE_FILE}"
 
         checkpoint_path = f"{CHECKPOINT_DIR}/{run_name}.pt"
         vae_model, args = load_checkpoint_model_for_eval(checkpoint_path, map_location=device, return_args=True)
         vae_model = vae_model.to(device)
 
         # Check if data is there we need
-        if not (os.path.isfile(reconstruct_file) or os.path.isfile(sample_file)):
-            print("no encoding / sample files, skipping for now. run the sample-encode-reconstruct NB first.")
+        if not (os.path.isfile(reconstruct_file) or os.path.isfile(sample_file) or os.path.isfile(cond_sample_file)):
+            print("no encoding or (cond) sample files, skipping for now. run the sample-encode-reconstruct NB first.")
             continue
 
         done_surprisal_recon = False
@@ -457,7 +572,7 @@ def gather_surprisal_stats(device="cuda:0", include_train=True, batch_size_surpr
             if "train" in torch.load(surprisal_reconstruct_file):
                 done_surprisal_recon = True
 
-        # Conditional generation - reconstructions
+        # Reconstructions
         if not done_surprisal_recon:
             with torch.no_grad():
                 surprisal_reconstructions(reconstruct_file=reconstruct_file,
@@ -465,6 +580,17 @@ def gather_surprisal_stats(device="cuda:0", include_train=True, batch_size_surpr
                                           vae_model=vae_model,
                                           batch_size_surprisal=batch_size_surprisal,
                                           n_iw_samples=n_iw_samples, device=device)
+        else:
+            print("did reconstructions already, skipping!")
+
+        # Conditional generation
+        if not os.path.isfile(surprisal_conditional_sample_file):
+            with torch.no_grad():
+                surprisal_conditional_generation(conditional_sample_file=cond_sample_file,
+                                                 surprisal_conditional_sample_file=surprisal_conditional_sample_file,
+                                                 vae_model=vae_model,
+                                                 batch_size_surprisal=batch_size_surprisal,
+                                                 n_iw_samples=n_iw_samples, device=device)
         else:
             print("did reconstructions already, skipping!")
 
@@ -616,36 +742,50 @@ def knn_predictions_for_samples_reconstructions(batch_size=100,
 
         save_dir = f"{ANALYSIS_DIR}/{run_name}"
         sample_file = f"{save_dir}/{SAMPLE_FILE}"
+        cond_sample_file = f"{save_dir}/{CONDITIONAL_SAMPLE_FILE}"
         recon_file = f"{save_dir}/{ENCODE_RECONSTUCT_FILE}"
         knn_sample_save_file = f"{save_dir}/{KNN_PREDICT_SAMPLES_FILE}"
+        knn_cond_sample_save_file = f"{save_dir}/{KNN_PREDICT_CONDITIONAL_SAMPLES_FILE}"
         knn_recon_save_file = f"{save_dir}/{KNN_PREDICT_RECONSTRUCTIONS_FILE}"
 
-        if not os.path.isfile(sample_file):
-            print("No samples of this model, run sample-encode-reconstruct NB, continuing!")
-            continue
+        if os.path.isfile(sample_file):
+            if not os.path.isfile(knn_sample_save_file):
+                samples = torch.load(sample_file)
+                sample_loader = DataLoader(TensorDataset(samples["x"]),
+                                           batch_size=batch_size)
+                sample_preds = make_knn_predictions(knn, sample_loader, knn_mimicker=knn_mimicker, device=device)
+                pickle.dump(sample_preds, open(knn_sample_save_file, "wb"))
 
-        # if not os.path.isfile(knn_sample_save_file):
-        assert os.path.isfile(sample_file), "no samples for this model, run encode_reconstruct_sample"
-        samples = torch.load(sample_file)
-        sample_loader = DataLoader(TensorDataset(samples["x"]),
-                                   batch_size=batch_size)
-        sample_preds = make_knn_predictions(knn, sample_loader, knn_mimicker=knn_mimicker, device=device)
-        pickle.dump(sample_preds, open(knn_sample_save_file, "wb"))
+                del sample_preds
+                del sample_loader
+        else:
+            print("no sampless for this model, run encode_reconstruct_sample")
 
-        del sample_preds
-        del sample_loader
+        if os.path.isfile(recon_file):
+            if not os.path.isfile(knn_recon_save_file):
+                recons = torch.load(recon_file)
+                preds = dict()
+                for phase in ["train", "test", "valid"]:
+                    r = recons[phase]["reconstruct"]
+                    loader = DataLoader(TensorDataset(r), batch_size=batch_size)
+                    preds[phase] = make_knn_predictions(knn, loader, knn_mimicker=knn_mimicker, device=device)
 
-        # if not os.path.isfile(knn_recon_save_file):
-        assert os.path.isfile(recon_file), "no reconstructions for this model, run encode_reconstruct_sample"
-        recons = torch.load(recon_file)
-        preds = dict()
-        for phase in ["train", "test", "valid"]:
-            r = recons[phase]["reconstruct"]
-            loader = DataLoader(TensorDataset(r), batch_size=batch_size)
-            preds[phase] = make_knn_predictions(knn, loader, knn_mimicker=knn_mimicker, device=device)
+                pickle.dump(preds, open(knn_recon_save_file, "wb"))
+        else:
+            print("no reconstructions for this model, run encode_reconstruct_sample")
 
-        pickle.dump(preds, open(knn_recon_save_file, "wb"))
+        if os.path.isfile(cond_sample_file):
+            if not os.path.isfile(knn_cond_sample_save_file):
+                cond_samples = torch.load(cond_sample_file)
+                preds = dict()
+                for phase in ["train", "test", "valid"]:
+                    s = cond_samples[phase]["cond_sample_x"]
+                    loader = DataLoader(TensorDataset(s), batch_size=batch_size)
+                    preds[phase] = make_knn_predictions(knn, loader, knn_mimicker=knn_mimicker, device=device)
 
+                pickle.dump(preds, open(knn_cond_sample_save_file, "wb"))
+        else:
+            print("no conditional samples for this model, run encode_reconstruct_sample")
 
 def make_knn_predictions_data():
     from dataset_dataloader import ImageDataset
@@ -707,7 +847,6 @@ def knn_prediction_distribution_stats(
     knn_preds_stats_file = f"{save_dir}/{KNN_PREDICT_STATS_FILE}"
 
     if not os.path.isfile(knn_preds_stats_file):
-
         instance_dist_test_data = td.Categorical(probs=torch.FloatTensor(knn_data_pred["test"]["proba"]))
         instance_dist_valid_data = td.Categorical(probs=torch.FloatTensor(knn_data_pred["valid"]["proba"]))
         instance_dist_train_data = td.Categorical(probs=torch.FloatTensor(knn_data_pred["train"]["proba"]))
@@ -741,11 +880,11 @@ def knn_prediction_distribution_stats(
                             kl_marg_marg_data_mean=valid_kl_marg_marg_data.mean().item())
 
         res['test'] = dict(kl_instance_marg_pred=test_data_kl_instance_marg.tolist(),
-                            kl_instance_marg_pred_mean=test_data_kl_instance_marg.mean().item(),
-                            kl_marg_uniform=test_kl_marg_uniform.tolist(),
-                            kl_marg_uniform_mean=test_kl_marg_uniform.mean().item(),
-                            kl_marg_marg_data=test_kl_marg_marg_data.tolist(),
-                            kl_marg_marg_data_mean=test_kl_marg_marg_data.mean().item())
+                           kl_instance_marg_pred_mean=test_data_kl_instance_marg.mean().item(),
+                           kl_marg_uniform=test_kl_marg_uniform.tolist(),
+                           kl_marg_uniform_mean=test_kl_marg_uniform.mean().item(),
+                           kl_marg_marg_data=test_kl_marg_marg_data.tolist(),
+                           kl_marg_marg_data_mean=test_kl_marg_marg_data.mean().item())
 
         print("DATAGROUP: Saving KNN stats!")
         pickle.dump(res, open(knn_preds_stats_file, "wb"))
@@ -757,13 +896,15 @@ def knn_prediction_distribution_stats(
         save_dir = f"{ANALYSIS_DIR}/{run_name}"
 
         if not (os.path.isfile(f"{save_dir}/{KNN_PREDICT_RECONSTRUCTIONS_FILE}") or
-                os.path.isfile(f"{save_dir}/{KNN_PREDICT_SAMPLES_FILE}")):
+                os.path.isfile(f"{save_dir}/{KNN_PREDICT_SAMPLES_FILE}") or
+                os.path.isfile(f"{save_dir}/{KNN_PREDICT_CONDITIONAL_SAMPLES_FILE}")):
             print("No KNN predictions yet. Run knn_predictions_for_samples_reconstructions")
             print(save_dir)
             continue
 
         knn_preds_recon = pickle.load(open(f"{save_dir}/{KNN_PREDICT_RECONSTRUCTIONS_FILE}", "rb"))
         knn_preds_samples = pickle.load(open(f"{save_dir}/{KNN_PREDICT_SAMPLES_FILE}", "rb"))
+        knn_preds_cond_samples = pickle.load(open(f"{save_dir}/{KNN_PREDICT_CONDITIONAL_SAMPLES_FILE}", "rb"))
 
         knn_preds_stats_file = f"{save_dir}/{KNN_PREDICT_STATS_FILE}"
 
@@ -777,13 +918,18 @@ def knn_prediction_distribution_stats(
         # RECONSTRUCTIONS & SAMPLES
         # Some measurements over marginal prediction distribution versus instance prediciton distributions
         # phase: preds, proba, marg
-        for phase in ["test", "valid", "samples"]:
-            if phase != "samples":
-                instance_dists = td.Categorical(probs=torch.FloatTensor(knn_preds_recon[phase]["proba"]))
-                marginal_pred = td.Categorical(probs=torch.FloatTensor(knn_preds_recon[phase]["marg"]))
-            else:
+        for phase in ["cond_samples_test", "cond_samples_valid", "test", "valid", "samples"]:
+            if "cond_samples_" in phase:
+                p = phase.split("cond_samples_")[1]  # split of the phase
+                instance_dists = td.Categorical(probs=torch.FloatTensor(knn_preds_cond_samples[p]["proba"]))
+                marginal_pred = td.Categorical(probs=torch.FloatTensor(knn_preds_cond_samples[p]["marg"]))
+                phase = p
+            elif phase == "samples":
                 instance_dists = td.Categorical(probs=torch.FloatTensor(knn_preds_samples["proba"]))
                 marginal_pred = td.Categorical(probs=torch.FloatTensor(knn_preds_samples["marg"]))
+            else:
+                instance_dists = td.Categorical(probs=torch.FloatTensor(knn_preds_recon[phase]["proba"]))
+                marginal_pred = td.Categorical(probs=torch.FloatTensor(knn_preds_recon[phase]["marg"]))
 
             # KL [ p(y|z) | p(y) ]
             kl_instance_marg_pred = td.kl_divergence(instance_dists, marginal_pred)  # .mean().item()
@@ -835,6 +981,7 @@ def gather_avg_data_sample_per_class():
     assert avg_digits_X_flat.shape[0] == 10, "gather_avg_data_sample_per_class: stacking went wrong, invalid shape"
     return avg_digits_X_flat
 
+
 def data_space_collect_stats(x, preds, val_data_y, avg_digits_X_flat):
     uniform = td.Categorical(probs=torch.FloatTensor([0.1 for _ in range(10)]))
 
@@ -876,7 +1023,8 @@ def data_space_collect_stats(x, preds, val_data_y, avg_digits_X_flat):
         L0_i = x_i.sum(-1).mean()
         L0_all_classes.append(L0_i.item())
 
-        L2 = ((x_i - val_data_x_i_avg) ** 2).sum(dim=-1)
+        # if ord = None, L2 is computed as default
+        L2 = torch.linalg.vector_norm(x_i - val_data_x_i_avg ** 2, dim=-1)
         L2_all_data.append(L2)
         L2_all_classes.append(L2.mean().item())
 
@@ -909,6 +1057,7 @@ def data_space_collect_stats(x, preds, val_data_y, avg_digits_X_flat):
     res["x_i_avgs"] = x_i_avgs
 
     return res
+
 
 def data_space_stats():
     val_data_X, val_data_y = get_n_data_samples_x_y(image_dataset_name="bmnist", N_samples=1000, phase="valid")
@@ -958,22 +1107,30 @@ def data_space_stats():
             continue
 
         knn_preds_samples = pickle.load(open(f"{save_dir}/{KNN_PREDICT_SAMPLES_FILE}", "rb"))
+        knn_preds_cond_samples = pickle.load(open(f"{save_dir}/{KNN_PREDICT_CONDITIONAL_SAMPLES_FILE}", "rb"))
         knn_preds_recons = pickle.load(open(f"{save_dir}/{KNN_PREDICT_RECONSTRUCTIONS_FILE}", "rb"))
 
         encode_reconstruct = torch.load(f"{save_dir}/{ENCODE_RECONSTUCT_FILE}")
+        cond_samples = torch.load(f"{save_dir}/{CONDITIONAL_SAMPLE_FILE}")
         samples = torch.load(f"{save_dir}/{SAMPLE_FILE}")
 
-        data = {'samples': samples, **encode_reconstruct}
-        knn_preds = {"samples": knn_preds_samples, **knn_preds_recons}
+        cond_samples = {f"cond_samples_{k}":v for k, v in cond_samples.items()}
+
+        data = {'samples': samples, **encode_reconstruct, **cond_samples}
+        knn_preds = {"samples": knn_preds_samples, **knn_preds_recons, **knn_preds_cond_samples}
 
         all_results = dict()
 
-        for phase in ["train", "valid", "test", "samples"]:
+        for phase in ["train", "valid", "test", "cond_samples_train",
+                      "cond_samples_valid", "cond_samples_test", "samples"]:
 
-            if phase != "samples":
-                x = data[phase]["reconstruct"]
-            else:
+            if "cond_samples_" in phase:
+                p = phase.split("cond_samples_")[1]  # extract the phase: train, valid or test
+                x = data[p]["cond_sample_x"]
+            elif phase == "samples":
                 x = data[phase]['x']
+            else:
+                x = data[phase]["reconstruct"]
 
             preds = knn_preds[phase]["preds"]
             assert len(preds) == len(x), "the predictions and samples are expected to be of the same length"
