@@ -31,7 +31,6 @@ import seaborn as sns;
 
 sns.set()
 
-PLOT_DIR = f"{CODE_DIR}/notebooks/plots"
 ANALYSIS_DIR = f"{CODE_DIR}/analysis/analysis-files"
 CHECKPOINT_DIR = f"{CODE_DIR}/run_files/checkpoints"
 
@@ -377,8 +376,8 @@ def encode_reconstruct_sample(df, device="cuda:0", include_train=True, n_sample_
         if os.path.isfile(sample_file):
             done_sample = True
 
-        # if os.path.isfile(conditional_sample_file):
-        #     done_cond_sample = True
+        if os.path.isfile(conditional_sample_file):
+            done_cond_sample = True
 
         if done_encode and done_sample and done_cond_sample:
             print("Done this run already, continue")
@@ -1017,8 +1016,7 @@ def data_space_collect_stats(x, preds, val_data_y, avg_digits_X_flat):
         L0_i = x_i.sum(-1).mean()
         L0_all_classes.append(L0_i.item())
 
-        # if ord = None, L2 is computed as default
-        L2 = torch.linalg.vector_norm(x_i - val_data_x_i_avg ** 2, dim=-1)
+        L2 = torch.linalg.norm(x_i - val_data_x_i_avg ** 2, dim=1)
         L2_all_data.append(L2)
         L2_all_classes.append(L2.mean().item())
 
@@ -1108,7 +1106,8 @@ def data_space_stats():
         cond_samples = torch.load(f"{save_dir}/{CONDITIONAL_SAMPLE_FILE}")
         samples = torch.load(f"{save_dir}/{SAMPLE_FILE}")
 
-        cond_samples = {f"cond_samples_{k}":v for k, v in cond_samples.items()}
+        cond_samples = {f"cond_samples_{k}": v for k, v in cond_samples.items()}
+        knn_preds_cond_samples = {f"cond_samples_{k}": v for k, v in knn_preds_cond_samples.items()}
 
         data = {'samples': samples, **encode_reconstruct, **cond_samples}
         knn_preds = {"samples": knn_preds_samples, **knn_preds_recons, **knn_preds_cond_samples}
@@ -1119,8 +1118,7 @@ def data_space_stats():
                       "cond_samples_valid", "cond_samples_test", "samples"]:
 
             if "cond_samples_" in phase:
-                p = phase.split("cond_samples_")[1]  # extract the phase: train, valid or test
-                x = data[p]["cond_sample_x"]
+                x = data[phase]["cond_sample_x"]
             elif phase == "samples":
                 x = data[phase]['x']
             else:

@@ -57,11 +57,11 @@ def plot_latents(encodings, clean_name, plot_N_sep_posteriors=10, plot_N_encodin
     y = scipy.stats.norm.pdf(x, 0, 1)
 
     # [S, B, D] -> [B, D]
-    latents = encodings["z_post"][0, :plot_N_encodings, :].cpu().numpy()
+    latents = encodings["z"][:plot_N_encodings, :].cpu().numpy()
 
-    mean = encodings["mean_post"][:plot_N_encodings, :].cpu().numpy()
+    mean = encodings["mean"][:plot_N_encodings, :].cpu().numpy()
     mean_mean = mean.mean(axis=0)
-    std = encodings["scale_post"][:plot_N_encodings, :].cpu().numpy()
+    std = encodings["scale"][:plot_N_encodings, :].cpu().numpy()
     std_mean = std.mean(axis=0)
 
     plot_N_dims = 10
