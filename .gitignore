@@ -146,6 +146,7 @@ check_inference_model.ipynb
 /analysis/MNIST_analysis/Notebooks/basic_stats_runs.csv
 *.csv
 *.p
+*.pickle
 *.pt
 /analysis/MNIST_analysis/Notebooks/BEST_val plots (MMD, rate, ELBO, etc.) [last edited 11 oct].ipynb
 /analysis/MNIST_analysis/Notebooks/gather-analysis-results [last update 2 nov].ipynb
@@ -154,3 +155,4 @@ check_inference_model.ipynb
 /analysis/MNIST_analysis/Notebooks/BDA-GLM-NumPyro [last update 2 nov].ipynb
 /analysis/MNIST_analysis/Notebooks/BDA-Hierarchical-NumPyro [last update 2 nov].ipynb
 /analysis/MNIST_analysis/Notebooks/BDA-Mixture-Model-NumPyro [last update 8 nov].ipynb
+/analysis/MNIST_analysis/Notebooks/run-analysis-steps [last update 10 nov].ipynb
