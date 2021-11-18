@@ -148,11 +148,10 @@ check_inference_model.ipynb
 *.p
 *.pickle
 *.pt
-/analysis/MNIST_analysis/Notebooks/BEST_val plots (MMD, rate, ELBO, etc.) [last edited 11 oct].ipynb
-/analysis/MNIST_analysis/Notebooks/gather-analysis-results [last update 2 nov].ipynb
-/analysis/MNIST_analysis/Notebooks/info-vae-analysis [last edited 8 oct].ipynb
-/analysis/MNIST_analysis/Notebooks/BDA Mixed-Membership Prior-Data-Space Numpyro [last update 9 nov].ipynb
-/analysis/MNIST_analysis/Notebooks/BDA-GLM-NumPyro [last update 2 nov].ipynb
-/analysis/MNIST_analysis/Notebooks/BDA-Hierarchical-NumPyro [last update 2 nov].ipynb
-/analysis/MNIST_analysis/Notebooks/BDA-Mixture-Model-NumPyro [last update 8 nov].ipynb
-/analysis/MNIST_analysis/Notebooks/run-analysis-steps [last update 10 nov].ipynb
+analysis/MNIST_analysis/Notebooks/BDA-GLM-NumPyro [last update 2 nov].ipynb
+analysis/MNIST_analysis/Notebooks/BDA-Hierarchical-NumPyro [last update 2 nov].ipynb
+analysis/MNIST_analysis/Notebooks/BDA-Mixture-Model-NumPyro [last update 8 nov].ipynb
+analysis/MNIST_analysis/Notebooks/BEST_val plots (MMD, rate, ELBO, etc.) [last edited 11 oct].ipynb
+analysis/MNIST_analysis/Notebooks/gather-analysis-results [last update 2 nov].ipynb
+analysis/MNIST_analysis/Notebooks/info-vae-analysis [last edited 8 oct].ipynb
+analysis/MNIST_analysis/Notebooks/run-analysis-steps [last update 10 nov].ipynb
