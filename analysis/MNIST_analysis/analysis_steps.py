@@ -11,7 +11,7 @@ from vae_model.distributions import AutoRegressiveDistribution
 if "cbarkhof" in str(pathlib.Path(__file__).parent.resolve()):
     CODE_DIR = "/home/cbarkhof/fall-2021"
 else:
-    CODE_DIR = "/Users/claartje/Dropbox/Werk/2021 ILLC/marginal-kl-vae"
+    CODE_DIR = "/"
 
 # import sys
 
@@ -20,22 +20,16 @@ else:
 import numpy as np
 import pickle
 from train import Trainer
-from train import test_from_checkpoint
 from utils import load_checkpoint_model_for_eval
-from analysis.analysis_utils import get_wandb_runs, get_test_validation_loader, get_n_data_samples_x_y
+from analysis.MNIST_analysis.analysis_utils import get_wandb_runs, get_test_validation_loader, get_n_data_samples_x_y
 
 import pandas as pd
 
 pd.options.display.float_format = '{:.6f}'.format
 
-import wandb
-
-import matplotlib.pyplot as plt
 import seaborn as sns;
 
 sns.set()
-import matplotlib.patches as mpatches
-from adjustText import adjust_text
 
 PLOT_DIR = f"{CODE_DIR}/notebooks/plots"
 ANALYSIS_DIR = f"{CODE_DIR}/analysis/analysis-files"

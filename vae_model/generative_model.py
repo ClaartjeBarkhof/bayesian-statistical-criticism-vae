@@ -53,21 +53,28 @@ class GenerativeModel(nn.Module):
         # OUTPUT DISTRIBUTION == DATA DISTRIBUTION
         self.p_x_z_type = args.data_distribution
 
-    def sample_generative_model(self, Sx=1, Sz=1, return_z=False, device="cuda:0"):
-        # [S, 1, D]
-        z_prior = self.sample_prior(S=Sz).to(device)
-        p_x_z = self.p_x_z(z_prior)
+    def sample_generative_model(self, z=None, Sx=1, Sz=1, return_z=False, device="cuda:0"):
+        # Unconditional generation
+        if z is None:
+            # [S, 1, D]
+            z = self.sample_prior(S=Sz).to(device)
+        # Conditional generation
+        else:
+            assert z.dim() == 3, f"we expect z always to be 3d [S, B, D], shape received {z.shape}"
+
+        p_x_z = self.p_x_z(z)
 
         # Because of its autoregressiveness, it is better to do it this way
         # a bit of a hack: make some sort of autoregressive distribution here as well
         if self.decoder_network_type == "cond_pixel_cnn_pp":
             sampled_x = self.decoder_network.sample
-
         else:
             sampled_x = p_x_z.sample(sample_shape=(Sx,))
 
+        # sampled_x is of shape: [Sx, Sz, B, C, W, H]
+
         if return_z:
-            return z_prior, sampled_x
+            return z, sampled_x
         else:
             return sampled_x
 

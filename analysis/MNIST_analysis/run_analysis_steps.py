@@ -5,11 +5,9 @@ import torch
 import argparse
 import distutils
 
-from analysis.analysis_steps import make_run_overview_df
-from analysis.analysis_steps import encode_reconstruct_sample
-from analysis.analysis_steps import gather_surprisal_stats
-from analysis.analysis_steps import simple_evaluate_valid_test
-from analysis.analysis_steps import knn_predictions_for_samples_reconstructions
+from analysis.MNIST_analysis.analysis_steps import make_run_overview_df
+from analysis.MNIST_analysis.analysis_steps import encode_reconstruct_sample
+from analysis.MNIST_analysis.analysis_steps import gather_surprisal_stats
 
 # ------------------------------------------------------------------------------------------------
 # GLOBALS
