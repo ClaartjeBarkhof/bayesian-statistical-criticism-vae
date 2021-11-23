@@ -7,10 +7,33 @@ from vae_model.made import MADE
 
 from vae_model.sylvester_flows.models.layers import GatedConv2d
 
+from transformers.models.roberta.configuration_roberta import RobertaConfig
+from vae_model.roberta.roberta import RobertaModel
+
+# --------------------------------------------------------------------------------------------------------------------
+# CONTENTS
+
+# InferenceModel
+#   - init
+#   - get_encoder_network
+#   - get_posterior_distribution_block
+#   - infer_q_z_x
+#   - forward
+
+# Posterior distribution blocks (q_z_x_params -> q_z_x)
+#   * IndependentGaussianBlock
+#   * StandardNormal
+#   * ConditionalGaussianBlockMade
+#   * IAF (not implemented)
+
+# Encoder architecture blocks (x -> q_z_x_params)
+#   * EncoderGatedConvolutionBlock (image)
+#   * EncoderMLPBlock (image)
+#   * EncoderDistilRoberta (language)
+
 
 # --------------------------------------------------------------------------------------------------------------------
 # INFERENCE MODEL
-
 class InferenceModel(nn.Module):
     def __init__(self, args, device="cpu"):
         super(InferenceModel, self).__init__()
@@ -49,8 +72,10 @@ class InferenceModel(nn.Module):
                 raise NotImplementedError
         # LANGUAGE: categorical
         else:
-            # TODO: implement for language
-            raise NotImplementedError
+            if self.encoder_network == "distil_roberta_encoder":
+                return EncoderDistilRoberta(args=self.args)
+            else:
+                raise NotImplementedError
 
     def get_posterior_distribution_block(self):
         """Retrieves the right mapper from the NN block to the actual posterior distribution to work with."""
@@ -242,5 +267,38 @@ class EncoderMLPBlock(nn.Module):
         # reshape image to [B, image_w*image_h*C]
         x_in_flat = x_in.reshape(x_in.shape[0], -1)
         q_z_x_params = self.encoder_mlp_block(x_in_flat)
+
+        return q_z_x_params
+
+
+class EncoderDistilRoberta(nn.Module):
+    def __init__(self, args=None):
+        super().__init__()
+
+        self.D = args.latent_dim
+
+        checkpoint_name = "distilroberta-base"
+        config = RobertaConfig.from_pretrained(checkpoint_name)
+
+        # make some important settings explicit
+        config.is_decoder = False
+        config.add_cross_attention = False
+        config.max_length = args.max_seq_len
+
+        self.roberta_model = RobertaModel(config=config).from_pretrained(pretrained_model_name_or_path=checkpoint_name,
+                                                                         config=config)
+
+        self.pooler_projection = nn.Linear(config.hidden_size, self.D)
+
+    def forward(self, input_ids=None, attention_mask=None, past_key_values=None,
+                use_cache=None, output_attentions=None, output_hidden_states=None, return_dict=None, **args):
+
+        roberta_model_out = self.roberta_model(input_ids=input_ids, attention_mask=attention_mask,
+                                               past_key_values=past_key_values, use_cache=use_cache,
+                                               output_attentions=output_attentions,
+                                               output_hidden_states=output_hidden_states, return_dict=return_dict,
+                                               **args)
+
+        q_z_x_params = self.pooler_projection(roberta_model_out.pooler_output)
 
         return q_z_x_params

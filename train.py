@@ -1,7 +1,7 @@
 from arguments import prepare_parser
 from vae_model.vae import VaeModel
 import torch
-from dataset_dataloader import ImageDataset
+from dataset_dataloader import ImageDataset, LanguageDataset
 from pytorch_constrained_opt.constraint import ConstraintOptimizer
 from objective import Objective
 import utils
@@ -234,7 +234,7 @@ def main(config=None):
 
     device_name = utils.determine_device(args)
 
-    dataset = ImageDataset(args=args) if args.image_or_language == "image" else None
+    dataset = ImageDataset(args=args) if args.image_or_language == "image" else LanguageDataset(args=args)
 
     vae_model = VaeModel(args=args, device=device_name)
     vae_model = vae_model.to(device_name)
