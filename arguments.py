@@ -105,12 +105,14 @@ def prepare_parser(jupyter=False, print_settings=True):
     parser.add_argument("--latent_dim", default=32, type=int, help="Dimensionality of the latent space.")
     parser.add_argument("--decoder_network_type", default="basic_deconv_decoder", type=str,
                         help="Which architecture / distribution structure to use for decoder, options:"
-                             "  - basic_mlp_decoder"
-                             "  - basic_deconv_decoder:"
+                             "  - basic_mlp_decoder (image)"
+                             "  - basic_deconv_decoder (image):"
                              "      p(x|z)"
-                             "  - conditional_made_decoder,"
-                             "  - cond_pixel_cnn_pp:"
-                             "      p(x_d|z, x<d)")
+                             "  - conditional_made_decoder (image),"
+                             "  - cond_pixel_cnn_pp (image):"
+                             "      p(x_d|z, x<d)"
+                             "  - distil_roberta_strong_decoder (language)"
+                             "  - distil_roberta_weak_decoder (language)")
     parser.add_argument("--decoder_MADE_gating", default=True, type=lambda x: bool(distutils.util.strtobool(x)),
                         help="Whether or not to make use of (learned) gated addition of the context.")
     parser.add_argument("--decoder_MADE_gating_mechanism", default=0, type=int,
@@ -121,8 +123,9 @@ def prepare_parser(jupyter=False, print_settings=True):
                         help="Sizes of the hidden layers of the decoder MADE, format as H-H-H")
     parser.add_argument("--encoder_network_type", default="basic_conv_encoder", type=str,
                         help="Which architecture / distribution structure to use for decoder, options:"
-                             "  - basic_mlp_encoder"
-                             "  - basic_conv_encoder")
+                             "  - basic_mlp_encoder (image)"
+                             "  - basic_conv_encoder (image)"
+                             "  - distil_roberta_encoder (language)")
     parser.add_argument("--encoder_MADE_hidden_sizes", default="200-220", type=str,
                         help="Sizes of the hidden layers of the decoder MADE, format as H-H-H")
 
@@ -154,7 +157,7 @@ def prepare_parser(jupyter=False, print_settings=True):
     # GENERAL DATASET ARGUMENTS
     parser.add_argument("--data_dir", default=get_code_dir() + '/data', type=str,
                         help="The name of the data directory.")
-    parser.add_argument("--image_or_language", default='image', type=str,
+    parser.add_argument("--image_or_language", default='language', type=str,
                         help="The type of the dataset, options: 'image' or 'language'.")
     parser.add_argument("--data_distribution", default='bernoulli', type=str,
                         help="The type of data distribution, bernoulli for binary inputs and"
@@ -169,14 +172,18 @@ def prepare_parser(jupyter=False, print_settings=True):
 
     # ----------------------------------------------------------------------------------------------------------------
     # LANGUAGE DATASET ARGUMENTS
-    parser.add_argument("--tokenizer_name", default='roberta', type=str,
-                        help="The name of the tokenizer, 'roberta' by default.")
-    parser.add_argument("--language_dataset_name", default='ptb_text_only', type=str,
-                        help="The name of the dataset, 'cnn_dailymail' by default, else: ptb_text_only.")
+    parser.add_argument("--tokenizer_name", default='roberta-base', type=str,
+                        help="The name of the tokenizer, 'roberta-base' by default.")
+    parser.add_argument("--language_dataset_name", default='ptb', type=str,
+                        help="The name of the dataset, 'yahoo_answer' by default, options:"
+                             "  - yahoo_answer"
+                             "  - ptb")
     parser.add_argument("--vocab_size", default=50265, type=int,
                         help="Size of the vocabulary size of the tokenizer used.")  # 50265 = roberta vocab size
     parser.add_argument("--num_workers", default=6, type=int,
                         help="Num workers for data loading.")
+    parser.add_argument("--pin_memory", default=True, type=lambda x: bool(distutils.util.strtobool(x)),
+                        help="Whether or not pin memory (set to True if use gpu).")
     parser.add_argument("--max_seq_len", default=64, type=int,
                         help="What the maximum sequence length the model accepts is (default: 128).")
 
@@ -317,14 +324,15 @@ def check_settings(args):
     check_valid_option(args.objective, objective_options, "objective")
 
     # Decoder network types
-    decoder_network_type_options = ["basic_mlp_decoder", "basic_deconv_decoder", "conditional_made_decoder", "cond_pixel_cnn_pp"]
+    decoder_network_type_options = ["basic_mlp_decoder", "basic_deconv_decoder", "conditional_made_decoder",
+                                    "cond_pixel_cnn_pp", "distil_roberta_strong_decoder", "distil_roberta_weak_decoder"]
     check_valid_option(args.decoder_network_type, decoder_network_type_options, "decoder_network_type")
 
     MADE_gating_mech_options = [0, 1]
     check_valid_option(args.decoder_MADE_gating_mechanism, MADE_gating_mech_options, "decoder_MADE_gating_mechanism")
 
     # Encoder network types
-    encoder_network_type_options = ["basic_mlp_encoder", "basic_conv_encoder"]
+    encoder_network_type_options = ["basic_mlp_encoder", "basic_conv_encoder", "distil_roberta_encoder"]
     check_valid_option(args.encoder_network_type, encoder_network_type_options, "encoder_network_type")
 
     # Posterior types
@@ -338,7 +346,7 @@ def check_settings(args):
     p_z_type_options = ["isotropic_gaussian", "mog"]
     check_valid_option(args.p_z_type, p_z_type_options, "p_z_type")
 
-    p_x_z_type_options = ["bernoulli", "multinomial"]
+    p_x_z_type_options = ["bernoulli", "multinomial", "categorical"]
     check_valid_option(args.p_x_z_type, p_x_z_type_options, "p_x_z_type")
 
     if args.decoder_network_type == "conditional_made_decoder" and not (args.p_x_z_type == "bernoulli"):
