@@ -18,6 +18,16 @@ class Trainer:
         self.args = args
         self.dataset = dataset
         self.data_loaders = dataset.get_train_validation_loaders() if dataset is not None else None
+
+        #
+        if self.args.image_or_language == "language":
+            max_samples_in_mem = 200
+            batch_size = int(np.floor(max_samples_in_mem / self.args.iw_n_samples))
+        else:
+            batch_size = self.args.batch_size
+
+        self.eval_ll_data_loader = dataset.valid_loader(num_workers=self.args.num_workers, batch_size=batch_size, shuffle=False)
+
         self.vae_model = vae_model
         self.objective = Objective(args=args, device=self.device)  # this holds the constraint as well
         self.optimisers = self.get_optimisers()
@@ -75,7 +85,12 @@ class Trainer:
     def shared_step(self, x_in):
         self.vae_model.eval()
 
-        x_in = x_in.to(self.device)
+        # language
+        if type(x_in) == dict:
+            x_in = (x_in["input_ids"].to(self.device), x_in["attention_mask"].to(self.device))
+        # image
+        else:
+            x_in = x_in.to(self.device)
 
         q_z_x, z_post, p_z, p_x_z = self.vae_model(x_in)
 
@@ -120,8 +135,11 @@ class Trainer:
                 epoch_stats = utils.make_nested_dict()
 
                 for batch_idx, batch in enumerate(self.data_loaders[phase]):
-                    # [B, C, W, H]
-                    x_in, _ = batch
+                    if type(batch) != dict:
+                        # [B, C, W, H]
+                        x_in, _ = batch  # get rid of y
+                    else:
+                        x_in = batch  # keep the full dict w. input_ids, attention_mask
 
                     if phase == "train":
                         loss_dict = self.train_step(x_in)
@@ -148,7 +166,7 @@ class Trainer:
                         break
 
                 if phase == "valid" and epoch % self.args.eval_ll_every_n_epochs == 0:
-                    iw_lls = self.vae_model.estimate_log_likelihood_dataset(self.data_loaders["valid"],
+                    iw_lls = self.vae_model.estimate_log_likelihood_dataset(self.eval_ll_data_loader,
                                                                             n_samples=self.args.iw_n_samples,
                                                                             short_dev_run=self.args.short_dev_run)
                     epoch_stats["iw_ll"] = iw_lls

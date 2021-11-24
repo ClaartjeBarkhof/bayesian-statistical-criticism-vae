@@ -62,7 +62,8 @@ class InferenceModel(nn.Module):
 
     def get_encoder_network(self):
         """Retrieves a network block for data set type language (transformer block) or image (convolutional block)"""
-        # IMAGE: bernoulli or categorical data distribution
+
+        # IMAGE
         if self.image_or_language == "image":
             if self.encoder_network_type == "basic_mlp_encoder":
                 return EncoderMLPBlock(args=self.args)
@@ -70,9 +71,10 @@ class InferenceModel(nn.Module):
                 return EncoderGatedConvolutionBlock(args=self.args)
             else:
                 raise NotImplementedError
-        # LANGUAGE: categorical
+
+        # LANGUAGE
         else:
-            if self.encoder_network == "distil_roberta_encoder":
+            if self.encoder_network_type == "distil_roberta_encoder":
                 return EncoderDistilRoberta(args=self.args)
             else:
                 raise NotImplementedError
@@ -288,17 +290,16 @@ class EncoderDistilRoberta(nn.Module):
         self.roberta_model = RobertaModel(config=config).from_pretrained(pretrained_model_name_or_path=checkpoint_name,
                                                                          config=config)
 
-        self.pooler_projection = nn.Linear(config.hidden_size, self.D)
+        self.pooler_projection = nn.Linear(config.hidden_size, 256)
 
-    def forward(self, input_ids=None, attention_mask=None, past_key_values=None,
-                use_cache=None, output_attentions=None, output_hidden_states=None, return_dict=None, **args):
+    def forward(self, x_in):
+        input_ids, attention_mask = x_in
+        print("input_ids.shape, attention_mask.shape", input_ids.shape, attention_mask.shape)
 
-        roberta_model_out = self.roberta_model(input_ids=input_ids, attention_mask=attention_mask,
-                                               past_key_values=past_key_values, use_cache=use_cache,
-                                               output_attentions=output_attentions,
-                                               output_hidden_states=output_hidden_states, return_dict=return_dict,
-                                               **args)
+        # [B, 768]
+        roberta_model_out = self.roberta_model(input_ids=input_ids, attention_mask=attention_mask, return_dict=True)
 
+        # [B, 256]
         q_z_x_params = self.pooler_projection(roberta_model_out.pooler_output)
 
         return q_z_x_params

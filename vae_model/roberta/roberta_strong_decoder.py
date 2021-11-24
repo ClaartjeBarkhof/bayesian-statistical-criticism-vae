@@ -330,7 +330,7 @@ class VaeStrongDecoderRobertaSelfAttention(nn.Module):
         attention_scores = attention_scores / math.sqrt(self.attention_head_size)
         if attention_mask is not None:
             # >>>>>> Claartje code
-            if z is not None:
+            if layer_z is not None:
                 # If there is a latent vector added to the key, value matrices, the attention mask should
                 # not mask attending to this. When tokens are masked their value is set to -1000.0 and
                 # when they are not masked they are set to 0.0. We want all tokens to have access to the latents
@@ -1091,46 +1091,3 @@ def create_position_ids_from_input_ids(input_ids, padding_idx, past_key_values_l
     mask = input_ids.ne(padding_idx).int()
     incremental_indices = (torch.cumsum(mask, dim=1).type_as(mask) + past_key_values_length) * mask
     return incremental_indices.long() + padding_idx
-
-
-
-
-if __name__ == "__main__":
-
-    import sys
-
-    sys.path.append("/home/cbarkhof/fall-2021")
-    from dataset_dataloader import LanguageDataset
-    from vae_model.roberta.roberta import RobertaVaeEncoder
-
-    lang_dataset = LanguageDataset()
-    train_loader = lang_dataset.train_loader(shuffle=True, batch_size=128, num_workers=1)
-
-    device = "cuda:0"
-
-    vae_encoder = RobertaVaeEncoder().to(device)
-    vae_decoder = RobertaVaeStrongDecoder().to(device)
-
-    for batch in train_loader:
-        masks = batch["attention_mask"].to(device)
-        inputs = batch["input_ids"].to(device)
-
-        print("batch inputs", inputs.shape)
-        print("batch masks", masks.shape)
-
-        dist = vae_encoder(input_ids=inputs, attention_mask=masks)
-        z = dist.sample()
-
-        print(z.shape)
-
-        dec_out = vae_decoder(z=z.to(device), x_in=(inputs, masks))
-
-        for k, v in vars(dec_out).items():
-            if torch.is_tensor(v):
-                print(k, v.shape)
-            elif type(v) == tuple or type(v) == list:
-                print(k, len(v))
-            else:
-                print(k, v)
-
-        break

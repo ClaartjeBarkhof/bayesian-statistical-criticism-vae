@@ -24,6 +24,8 @@ class GenerativeModel(nn.Module):
         self.D = args.latent_dim
         self.B = args.batch_size
 
+        self.image_or_language = args.image_or_language
+
         # LANGUAGE
         self.L = args.max_seq_len
         self.V = args.vocab_size
@@ -126,6 +128,8 @@ class GenerativeModel(nn.Module):
 
         Returns a distribution-like object with parameters [S, B, ...], reducing ... as dimensions for log_prob
         """
+
+        p_x_z = None
         if self.decoder_network_type == "conditional_made_decoder":
             # Autoregressive distribution object
             # the true forward is only called with log_prob
@@ -137,25 +141,39 @@ class GenerativeModel(nn.Module):
             # flattening / reshaping for MLP or Conv happens in respective modules
             p_x_z_params = self.decoder_network(z, x_in=x_in)
 
-            if self.p_x_z_type == "bernoulli":
-                # [S, B, C, W, H]
-                assert p_x_z_params.shape == (S, B, self.C, self.image_w_h, self.image_w_h), \
-                    f"bernoulli logits should be of shape [S, B, C, W, H], currently of shape {p_x_z_params.shape}"
-                p_x_z = td.Independent(td.Bernoulli(logits=p_x_z_params), 3)  # reduce last 3 dimensions with log_prob
+            # DATA DISTRIBUTION (bernoulli or categorical)
+            if self.image_or_language == "image":
+                if self.p_x_z_type == "bernoulli":
+                    # [S, B, C, W, H]
+                    assert p_x_z_params.shape == (S, B, self.C, self.image_w_h, self.image_w_h), \
+                        f"bernoulli logits should be of shape [S, B, C, W, H], currently of shape {p_x_z_params.shape}"
+                    p_x_z = td.Independent(td.Bernoulli(logits=p_x_z_params), 3)  # reduce last 3 dimensions with log_prob
 
-            elif self.p_x_z_type == "multinomial":
-                # [S, B, C, W, H, num_classes]
-                assert p_x_z_params.shape == (S, B, self.C, self.image_w_h, self.image_w_h), \
-                    f"multinomial logits should be of shape [S, B, C, W, H, num_classes], currently of shape {p_x_z_params.shape}"
-                p_x_z = td.Categorical(logits=p_x_z_params)
+                elif self.p_x_z_type == "multinomial":
+                    # [S, B, C, W, H, num_classes]
+                    assert p_x_z_params.shape == (S, B, self.C, self.image_w_h, self.image_w_h), \
+                        f"multinomial logits should be of shape [S, B, C, W, H, num_classes], currently of shape {p_x_z_params.shape}"
+                    p_x_z = td.Categorical(logits=p_x_z_params)
 
-            # LANGUAGE
-            elif self.p_x_z_type == "categorical":
-                assert p_x_z_params.shape == (S, B, self.max_seq_len, self.vocab_size), \
-                    f"categorical logits should be of shape (S, B, L, V), currently: {p_x_z_params.shape}"
-                p_x_z = td.Categorical(logits=p_x_z_params)
+            # LANGUAGE (categorical)
             else:
-                raise ValueError(f"{self.p_x_z_type} is not a valid data_distribution, choices: bernoulli, multinomial")
+                # strong decoder
+                if self.decoder_network_type == "strong_distil_roberta_decoder":
+                    assert p_x_z_params.shape == (S, B, self.L-1, self.V), \
+                        f"categorical logits should be of shape (S, B, L, V), currently: {p_x_z_params.shape}"
+                    # no independent because masking needs to happen still, so the seq. dim. should stay
+                    p_x_z = td.Categorical(logits=p_x_z_params)
+                # weak decoder
+                else:
+                    p_x_z_params, length_logits = p_x_z_params
+                    assert p_x_z_params.shape == (S, B, self.L - 1, self.V), \
+                        f"categorical logits should be of shape (S, B, L-1, V), currently: {p_x_z_params.shape}"
+                    assert length_logits.shape == (S, B, self.L), \
+                        f"we expect length_logits to be of shape (S, B, L), currently: {length_logits.shape}"
+                    # no independent because masking needs to happen still, so the seq. dim. should stay
+                    p_x_z = td.Categorical(logits=p_x_z_params)
+                    p_z_l = td.Categorical(logits=length_logits)
+                    p_x_z = (p_x_z, p_z_l)
 
         return p_x_z
 
@@ -184,9 +202,9 @@ class GenerativeModel(nn.Module):
             return DecoderPixelCNNppBlock(args=self.args)
 
         # Language
-        elif self.decoder_network_type == "roberta_strong_decoder":
+        elif self.decoder_network_type == "strong_distil_roberta_decoder":
             return DecoderStrongDistilRoberta(args=self.args)
-        elif self.decoder_network_type == "roberta_weak_decoder":
+        elif self.decoder_network_type == "weak_distil_roberta_decoder":
             return DecoderWeakDistilRoberta(args=self.args)
         else:
             raise NotImplementedError
@@ -448,10 +466,12 @@ class DecoderPixelCNNppBlock(nn.Module):
         return p_x_z_params
 
 
-class DecoderStrongRoberta(nn.Module):
+class DecoderStrongDistilRoberta(nn.Module):
     def __init__(self, args):
         super().__init__()
 
+        self.L = args.max_seq_len
+        self.V = args.vocab_size
         self.D = args.latent_dim
 
         checkpoint_name = "distilroberta-base"
@@ -460,7 +480,7 @@ class DecoderStrongRoberta(nn.Module):
         # make some important settings explicit
         self.config.is_decoder = True  # adds LM head and masks auto-regressively
         self.config.add_cross_attention = False  # not a classic seq2seq model
-        self.config.max_length = args.max_seq_len
+        self.config.max_length = self.L
 
         self.roberta_model = VaeStrongDecoderRobertaForCausalLM(config=self.config).from_pretrained(
             pretrained_model_name_or_path=checkpoint_name,
@@ -469,21 +489,35 @@ class DecoderStrongRoberta(nn.Module):
         self.latent_to_memory_projection = nn.Linear(self.D, self.config.hidden_size * self.config.num_hidden_layers)
         self.latent_to_memory_projection.weight.data.normal_(mean=0.0, std=self.config.initializer_range)
 
-        for k, v in vars(self.roberta_model.config).items():
-            print(k, v)
-
     def forward(self, z, x_in=None):
+        assert z.dim() == 3, f"we assume z to be 3D, current shape {z.shape}"
+        # x_in: [B, L, H]
+        # z_post: [B, D]
 
-        z_proj = self.latent_to_memory_projection(z)
+        (S, B, D) = z.shape
+        # Both z_2d and x_exp_2d need to have a sample dimension integrated in the first "batch" dimension = S*B
+        z_2d = z.reshape(S * B, D)
+
+        z_proj = self.latent_to_memory_projection(z_2d)
         # Makes tuple of equally sized tensors of (batch x 1 x hidden_size)
         z_proj = torch.split(z_proj.unsqueeze(1), self.config.hidden_size, dim=2)
 
         if x_in is None:
+            # TODO: implement auto-regressive forward
             p_x_z_params = self.auto_regressive_forward(z=z_proj)
         else:
             input_ids, attention_mask = x_in
-            out = self.roberta_model(z=z_proj, input_ids=input_ids, attention_mask=attention_mask, return_dict=True)
+            # In case we have a multi sample forward, we need to repeat X to match shape with z
+            input_ids_2d_exp = input_ids.repeat(S, 1, 1).reshape(S*B, -1)
+            attention_mask_2d_exp = attention_mask.repeat(S, 1, 1).reshape(S*B, -1)
+
+            out = self.roberta_model(z=z_proj, input_ids=input_ids_2d_exp,
+                                     attention_mask=attention_mask_2d_exp, return_dict=True)
+
             p_x_z_params = out.logits
+            p_x_z_params = p_x_z_params.reshape(S, B, self.L, self.V)
+            # cut of prediction for last token
+            p_x_z_params = p_x_z_params[:, :, :-1, :]
 
         return p_x_z_params
 
@@ -491,49 +525,13 @@ class DecoderStrongRoberta(nn.Module):
         raise NotImplementedError
 
 
-class DecoderStrongDistilRoberta(nn.Module):
-    def __init__(self, args):
-        super().__init__()
-
-        self.D = args.latent_dim
-
-        checkpoint_name = "distilroberta-base"
-        self.config = RobertaConfig.from_pretrained(checkpoint_name)
-
-        # make some important settings explicit
-        self.config.is_decoder = True  # mask auto-regressively
-        self.config.add_cross_attention = False  # not a classic seq2seq model
-        self.config.max_length = args.max_seq_len
-
-        self.roberta_model = VaeStrongDecoderRobertaForCausalLM(config=self.config).from_pretrained(
-            pretrained_model_name_or_path=checkpoint_name,
-            config=self.config)
-
-        self.latent_to_memory_projection = nn.Linear(self.D, self.config.hidden_size * self.config.num_hidden_layers)
-        self.latent_to_memory_projection.weight.data.normal_(mean=0.0, std=self.config.initializer_range)
-
-        for k, v in vars(self.roberta_model.config).items():
-            print(k, v)
-
-    def forward(self, z, x_in=None):
-
-        z_proj = self.latent_to_memory_projection(z)
-        # Makes tuple of equally sized tensors of (batch x 1 x hidden_size)
-        z_proj = torch.split(z_proj.unsqueeze(1), self.config.hidden_size, dim=2)
-
-        input_ids, attention_mask = x_in
-        out = self.roberta_model(z=z_proj, input_ids=input_ids, attention_mask=attention_mask, return_dict=True)
-        p_x_z_params = out.logits
-
-        return p_x_z_params
-
-
 class DecoderWeakDistilRoberta(nn.Module):
     def __init__(self, args):
         super().__init__()
 
         self.D = args.latent_dim
-        self.max_seq_len = args.max_seq_len
+        self.L = args.max_seq_len
+        self.V = args.vocab_size
 
         checkpoint_name = "distilroberta-base"
         self.config = RobertaConfig.from_pretrained(checkpoint_name)
@@ -541,22 +539,39 @@ class DecoderWeakDistilRoberta(nn.Module):
         # make some important settings explicit
         self.config.is_decoder = False  # no auto-regressive masking
         self.config.add_cross_attention = False  # not a classic seq2seq model
-        self.config.max_length = args.max_seq_len
+        self.config.max_length = self.L
 
+        # use the RobertaForMaskedLM model as it is a bidirectional model with no shift between input and ouput
         self.roberta_model = RobertaForMaskedLM(config=self.config).from_pretrained(
             pretrained_model_name_or_path=checkpoint_name,
             config=self.config)
 
         self.latent_to_h0_proj = nn.Linear(self.D, self.config.hidden_size)
-        self.latent_to_length = nn.Linear(self.D, self.max_seq_len)
+        # you make max. 63 preds
+        self.latent_to_length = nn.Linear(self.D, self.L)
 
     def forward(self, z, x_in=None):
+        assert z.dim() == 3, f"we assume z to be 3D, current shape {z.shape}"
+        # x_in is ignored!
+        # z_post: [B, D]
 
-        input_embeds = self.latent_to_h0_proj(z)
-        length = self.latent_to_length(z)
+        (S, B, D) = z.shape
+        # Both z_2d and x_exp_2d need to have a sample dimension integrated in the first "batch" dimension = S*B
+        z_2d = z.reshape(S * B, D)
+
+        # [B, D] -> [B, H]
+        h0 = self.latent_to_h0_proj(z_2d)
+        input_embeds = torch.stack([h0 for _ in range(self.L)], dim=1)
+
+        # [S, B, max_len - 1]
+        length_logits = self.latent_to_length(z_2d).reshape(S, B, -1)
 
         out = self.roberta_model(input_ids=None, attention_mask=None, inputs_embeds=input_embeds, return_dict=True)
 
         p_x_z_params = out.logits
+        p_x_z_params = p_x_z_params.reshape(S, B, self.L, self.V)
 
-        return (p_x_z_params, length)
+        # cut of prediction for last token
+        p_x_z_params = p_x_z_params[:, :, :-1, :]
+
+        return p_x_z_params, length_logits

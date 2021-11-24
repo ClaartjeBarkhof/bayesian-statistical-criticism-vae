@@ -74,22 +74,68 @@ class Objective(nn.Module):
 
         (S, B, D) = z_post.shape
 
+        label_mask, label_length, p_z_l = None, None, None
+
+        # Image: get labels for multinomial case
         if self.image_or_language == "image" and self.data_distribution == "multinomial":
             # map 0, 1 range to 0 256 integer range, code taken from:
             # https://github.com/riannevdberg/sylvester-flows/blob/ \
             # 32dde9b7d696fee94f946a338182e542779eecfe/optimization/loss.py#L74
             num_classes = 256
+
             labels = (x_in * (num_classes - 1)).long()
+
+        # Language: apply some masking
+        elif self.image_or_language == "language":
+            input_ids, attention_mask = x_in
+            # [S, B, L]
+            labels = input_ids[:, 1:].unsqueeze(0)
+            label_mask = attention_mask[:, 1:].unsqueeze(0)
+            # [S, B]
+            label_length = label_mask.sum(dim=-1).long()
+
+            # print("label_length.min", label_length.min())
+            # print("label_length.max", label_length.max())
+            #
+            # print("labels", labels.shape)
+            # print("label_mask", label_mask.shape)
+            # print("label_length", label_length.shape)
+
+        # Image: other cases
         else:
             labels = x_in
+
+        # Language: weak decoder (length model)
+        if self.args.decoder_network_type == "distil_roberta_weak_decoder":
+            assert type(p_x_z) == tuple, "we expect p_x_z may to be tuple of p_x_z and p_z_l"
+            p_x_z, p_z_l = p_x_z
 
         # Expected KL from prior to posterior (scalar)
         kl_prior_post = self.kl_prior_post(p_z=p_z, q_z_x=q_z_x, batch_size=B, z_post=z_post, analytical=True)
 
-        # Distortion [S, B]
+        # Distortion [S, B] or [S, B, L]
         log_p_x_z = p_x_z.log_prob(labels)
+        #print("log_p_x_z 0", log_p_x_z.shape)
+
+        if self.image_or_language == "language":
+            # [S, B, L] -> [S, B]
+            log_p_x_z = (log_p_x_z * label_mask).sum(dim=-1)
+
+            if self.args.decoder_network_type == "distil_roberta_weak_decoder":
+                #print("p_z_l", p_z_l.logits.shape)
+
+                log_p_l_z = p_z_l.log_prob(label_length)
+
+                #print("log_p_x_z 1", log_p_x_z.shape)
+                #print("label_length", label_length.shape)
+
+                #print("log_p_l_z", log_p_l_z.shape)
+
+                # this naming is a bit off but just to match the other code
+                log_p_x_z = log_p_x_z + log_p_l_z
+
         assert log_p_x_z.shape == (S, B), f"we assume p_x_z.log_prob shape to be be (S, B), currently {log_p_x_z.shape}"
-        # Average over samples and batch: [S, B] -> scalar
+        # Average over samples and batch: [S, B] -> scalar (we mostly assume that S=1 actually)
         distortion = - log_p_x_z.mean()
 
         # TODO: self.free_bits_kl(p_z, q_z_x, z_post, free_bits=self.args.free_bits, per_dimension=False)

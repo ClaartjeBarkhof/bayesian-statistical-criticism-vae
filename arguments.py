@@ -103,7 +103,7 @@ def prepare_parser(jupyter=False, print_settings=True):
     # ----------------------------------------------------------------------------------------------------------------
     # ARCHITECTURE
     parser.add_argument("--latent_dim", default=32, type=int, help="Dimensionality of the latent space.")
-    parser.add_argument("--decoder_network_type", default="basic_deconv_decoder", type=str,
+    parser.add_argument("--decoder_network_type", default="strong_distil_roberta_decoder", type=str,
                         help="Which architecture / distribution structure to use for decoder, options:"
                              "  - basic_mlp_decoder (image)"
                              "  - basic_deconv_decoder (image):"
@@ -111,8 +111,8 @@ def prepare_parser(jupyter=False, print_settings=True):
                              "  - conditional_made_decoder (image),"
                              "  - cond_pixel_cnn_pp (image):"
                              "      p(x_d|z, x<d)"
-                             "  - distil_roberta_strong_decoder (language)"
-                             "  - distil_roberta_weak_decoder (language)")
+                             "  - strong_distil_roberta_decoder (language)"
+                             "  - weak_distil_roberta_decoder (language)")
     parser.add_argument("--decoder_MADE_gating", default=True, type=lambda x: bool(distutils.util.strtobool(x)),
                         help="Whether or not to make use of (learned) gated addition of the context.")
     parser.add_argument("--decoder_MADE_gating_mechanism", default=0, type=int,
@@ -121,7 +121,7 @@ def prepare_parser(jupyter=False, print_settings=True):
                              "  - 1: pixel cnn like gate: h = act( m_lin(h) + lin(z)) * sigmoid(m_lin(h) + lin(z))")
     parser.add_argument("--decoder_MADE_hidden_sizes", default="200-220", type=str,
                         help="Sizes of the hidden layers of the decoder MADE, format as H-H-H")
-    parser.add_argument("--encoder_network_type", default="basic_conv_encoder", type=str,
+    parser.add_argument("--encoder_network_type", default="distil_roberta_encoder", type=str,
                         help="Which architecture / distribution structure to use for decoder, options:"
                              "  - basic_mlp_encoder (image)"
                              "  - basic_conv_encoder (image)"
@@ -146,12 +146,6 @@ def prepare_parser(jupyter=False, print_settings=True):
     parser.add_argument("--mog_n_components", default=10, type=int,
                         help="If using Mixture of Gaussians as prior, "
                              "this parameter sets the number of learned components.")
-    # p_x_z_type: [bernoulli, gaussian, multinomial]
-    parser.add_argument("--p_x_z_type", default="bernoulli", type=str,
-                        help="Which type of predictive p_x_z distribution to use, options:"
-                             "  - bernoulli"
-                             "  - gaussian"
-                             "  - multinomial")
 
     # ----------------------------------------------------------------------------------------------------------------
     # GENERAL DATASET ARGUMENTS
@@ -159,9 +153,8 @@ def prepare_parser(jupyter=False, print_settings=True):
                         help="The name of the data directory.")
     parser.add_argument("--image_or_language", default='language', type=str,
                         help="The type of the dataset, options: 'image' or 'language'.")
-    parser.add_argument("--data_distribution", default='bernoulli', type=str,
-                        help="The type of data distribution, bernoulli for binary inputs and"
-                             "multinomial for categorical inputs.")
+    parser.add_argument("--data_distribution", default='categorical', type=str,
+                        help="The type of data distribution (the type for p_x_z).")
 
     # ----------------------------------------------------------------------------------------------------------------
     # IMAGE DATASET ARGUMENTS
@@ -180,7 +173,7 @@ def prepare_parser(jupyter=False, print_settings=True):
                              "  - ptb")
     parser.add_argument("--vocab_size", default=50265, type=int,
                         help="Size of the vocabulary size of the tokenizer used.")  # 50265 = roberta vocab size
-    parser.add_argument("--num_workers", default=6, type=int,
+    parser.add_argument("--num_workers", default=2, type=int,
                         help="Num workers for data loading.")
     parser.add_argument("--pin_memory", default=True, type=lambda x: bool(distutils.util.strtobool(x)),
                         help="Whether or not pin memory (set to True if use gpu).")
@@ -188,7 +181,7 @@ def prepare_parser(jupyter=False, print_settings=True):
                         help="What the maximum sequence length the model accepts is (default: 128).")
 
     # ----------------------------------------------------------------------------------------------------------------
-    # PRINTING & LOGGING
+    # PRINTING, CHECKPOINTING & LOGGING
     parser.add_argument("--print_stats", default=True, type=lambda x: bool(distutils.util.strtobool(x)),
                         help="Whether or not print stats.")
     parser.add_argument("--print_every_n_steps", default=1, type=int,
@@ -203,15 +196,8 @@ def prepare_parser(jupyter=False, print_settings=True):
                         help="The name of the W&B project to store runs to.")
 
     # ----------------------------------------------------------------------------------------------------------------
-    # CHECKPOINTING
-    # parser.add_argument("--checkpoint", default=False, type=lambda x: bool(distutils.util.strtobool(x)),
-    #                     help="Whether or not to checkpoint (save) the model. (default: False).")
-    # parser.add_argument("--checkpoint_every_n_steps", default=10, type=int,
-    #                     help="Every how many (training) steps to checkpoint (default: 1000).")
-
-    # ----------------------------------------------------------------------------------------------------------------
     # DISTRIBUTED TRAINING
-    parser.add_argument("--gpus", default=0, type=int,
+    parser.add_argument("--gpus", default=1, type=int,
                         help="Number GPUs to use (default: None).")
     parser.add_argument("--ddp", default=False, type=lambda x: bool(distutils.util.strtobool(x)),
                         help="Whether or not to use Distributed Data Parallel (DDP) "
@@ -233,8 +219,6 @@ def prepare_parser(jupyter=False, print_settings=True):
                         help="Which directories to save checkpoints at.")
     parser.add_argument("--wandb_dir", default=get_code_dir() + "/run_files/", type=str,
                         help="Which directories to save checkpoints at.")
-
-
 
     # TODO: add seed & deterministic
 
@@ -307,17 +291,23 @@ def make_run_name(args):
 
 def check_settings(args):
     # DATA DISTRIBUTION / DATA SET CHOICES
-    valid_dists = ["multinomial", "bernoulli"]
-    assert args.data_distribution in valid_dists, \
-        f"Invalid data distribution: {args.data_distribution}, must be one of: {valid_dists}"
-    assert not (args.image_dataset_name == "bmnist" and args.data_distribution == "multinomial"), \
-        f"If the data set is Binarised MNIST, the data distribution should be set to bernoulli, " \
-        f"currently set to {args.data_distribution}."
-    assert not (args.image_dataset_name in ["fmnist", "mnist"] and args.data_distribution == "bernoulli"), \
-        f"If the data set is MNIST or Fashion MNIST, the data distribution should be set to " \
-        f"multinomial, currently set to {args.data_distribution}."
-    assert not (args.image_dataset_name in ["bminst", "fmnist", "mnist"] and not args.n_channels == 1), \
-        f"{args.image_dataset_name} is a 1-channel dataset."
+    if args.image_or_language == "image":
+        assert not (args.image_dataset_name == "bmnist" and not args.data_distribution == "bernoulli"), \
+            f"If the data set is Binarised MNIST, the data distribution should be set to bernoulli, " \
+            f"currently set to {args.data_distribution}."
+        assert not (args.image_dataset_name in ["fmnist", "mnist"] and args.data_distribution == "bernoulli"), \
+            f"If the data set is MNIST or Fashion MNIST, the data distribution should be set to " \
+            f"multinomial, currently set to {args.data_distribution}."
+        assert not (args.image_dataset_name in ["bminst", "fmnist", "mnist"] and not args.n_channels == 1), \
+            f"{args.image_dataset_name} is a 1-channel dataset."
+    elif args.image_or_language == "language":
+        assert not (args.image_or_language == "language" and not args.data_distribution == "categorical"), \
+            f"If you are modelling language data, you are tied to a categorical dist., currently: {args.data_distribution}"
+        assert not (args.image_or_language == "language" and not args.decoder_network_type in
+               ["strong_distil_roberta_decoder", "weak_distil_roberta_decoder"]), \
+                "for language decoder must be of roberta type"
+        assert not (args.image_or_language == "language" and not args.encoder_network_type == "distil_roberta_encoder"), \
+            "distil_roberta_encoder is the only option for language now"
 
     # Objective
     objective_options = ["VAE", "AE", "FB-VAE", "BETA-VAE", "MDR-VAE", "INFO-VAE", "LAG-INFO-VAE"]
@@ -325,7 +315,7 @@ def check_settings(args):
 
     # Decoder network types
     decoder_network_type_options = ["basic_mlp_decoder", "basic_deconv_decoder", "conditional_made_decoder",
-                                    "cond_pixel_cnn_pp", "distil_roberta_strong_decoder", "distil_roberta_weak_decoder"]
+                                    "cond_pixel_cnn_pp", "strong_distil_roberta_decoder", "weak_distil_roberta_decoder"]
     check_valid_option(args.decoder_network_type, decoder_network_type_options, "decoder_network_type")
 
     MADE_gating_mech_options = [0, 1]
@@ -346,8 +336,8 @@ def check_settings(args):
     p_z_type_options = ["isotropic_gaussian", "mog"]
     check_valid_option(args.p_z_type, p_z_type_options, "p_z_type")
 
-    p_x_z_type_options = ["bernoulli", "multinomial", "categorical"]
-    check_valid_option(args.p_x_z_type, p_x_z_type_options, "p_x_z_type")
+    data_dist_options = ["bernoulli", "multinomial", "categorical"]
+    check_valid_option(args.data_distribution, data_dist_options, "data_distribution")
 
     if args.decoder_network_type == "conditional_made_decoder" and not (args.p_x_z_type == "bernoulli"):
         raise NotImplementedError
