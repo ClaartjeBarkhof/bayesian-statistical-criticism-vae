@@ -253,7 +253,7 @@ class VaeStrongDecoderRobertaSelfAttention(nn.Module):
         # Claartje: here the memory mechanism acts (with cache)
         elif past_key_value is not None:
             mixed_key_layer = self.key(hidden_states)
-            mixed_value_layer = self.value_module(hidden_states)
+            mixed_value_layer = self.value(hidden_states)
 
             key_layer = self.transpose_for_scores(mixed_key_layer)
             value_layer = self.transpose_for_scores(mixed_value_layer)
@@ -276,7 +276,7 @@ class VaeStrongDecoderRobertaSelfAttention(nn.Module):
 
                 # Normal attention no cache or time_step is 0 with using cache
 
-        # Claartje: here the memory mechanism acts (with cache)
+        # Claartje: here the memory mechanism acts (without cache)
         else:
             mixed_key_layer = self.key(hidden_states)
             mixed_value_layer = self.value(hidden_states)
@@ -302,11 +302,24 @@ class VaeStrongDecoderRobertaSelfAttention(nn.Module):
             # if cross_attention save Tuple(torch.Tensor, torch.Tensor) of all cross attention key/value_states.
             # Further calls to cross_attention layer can then reuse all cross-attention
             # key/value_states (first "if" case)
+
             # if uni-directional self-attention (decoder) save Tuple(torch.Tensor, torch.Tensor) of
             # all previous decoder key/value_states. Further calls to uni-directional self-attention
             # can concat previous decoder key/value_states to current projected key/value_states (third "elif" case)
             # if encoder bi-directional self-attention `past_key_value` is always `None`
-            past_key_value = (key_layer, value_layer)
+            if layer_z is None:
+                past_key_value = (key_layer, value_layer)
+            # is a latent is passed, it is con
+            else:
+                # key_layer, value_layer: [B, N_heads, Seq_len + 1, Dim_per_head]
+                key_layer_without_latent = key_layer[:, :, 1:, :]
+                val_layer_without_latent = value_layer[:, :, 1:, :]
+
+                # print("key_layer", key_layer.shape)
+                # print("key_layer_without_latent", key_layer_without_latent.shape)
+                # print()
+
+                past_key_value = (key_layer_without_latent, val_layer_without_latent)
 
         # Take the dot product between "query" and "key" to get the raw attention scores.
         attention_scores = torch.matmul(query_layer, key_layer.transpose(-1, -2))

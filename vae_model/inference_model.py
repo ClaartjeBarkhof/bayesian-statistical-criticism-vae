@@ -294,7 +294,6 @@ class EncoderDistilRoberta(nn.Module):
 
     def forward(self, x_in):
         input_ids, attention_mask = x_in
-        print("input_ids.shape, attention_mask.shape", input_ids.shape, attention_mask.shape)
 
         # [B, 768]
         roberta_model_out = self.roberta_model(input_ids=input_ids, attention_mask=attention_mask, return_dict=True)

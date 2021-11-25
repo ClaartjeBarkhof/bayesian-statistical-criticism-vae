@@ -4,7 +4,7 @@ import torch.nn.functional as F
 import torch.distributions as td
 
 from vae_model.sylvester_flows.models.layers import GatedConvTranspose2d
-from vae_model.distributions import AutoRegressiveDistribution
+from vae_model.distributions import AutoRegressiveDistribution, AutoRegressiveRobertaStrongDecoder
 from vae_model.made import MADE
 
 from vae_model.pixel_cnn_pp.model import PixelCNN
@@ -138,7 +138,14 @@ class GenerativeModel(nn.Module):
         else:
             # [S, B, D]
             (S, B, _) = z.shape
-            # flattening / reshaping for MLP or Conv happens in respective modules
+
+            # Catch the case of the auto-regressive forward of strong language decoder
+            # this should return a special wrapper object of type AutoRegressiveRobertaStrongDecoder
+            if self.decoder_network_type == "strong_distil_roberta_decoder" and x_in is None:
+                p_x_z = self.decoder_network.auto_regressive_forward(z=z)
+                return p_x_z
+
+            # Flattening / reshaping for MLP or Conv happens in respective modules
             p_x_z_params = self.decoder_network(z, x_in=x_in)
 
             # DATA DISTRIBUTION (bernoulli or categorical)
@@ -490,6 +497,7 @@ class DecoderStrongDistilRoberta(nn.Module):
         self.latent_to_memory_projection.weight.data.normal_(mean=0.0, std=self.config.initializer_range)
 
     def forward(self, z, x_in=None):
+        assert x_in is None, "we assume x_in to be None always, otherwise auto_regressive_forward should be called"
         assert z.dim() == 3, f"we assume z to be 3D, current shape {z.shape}"
         # x_in: [B, L, H]
         # z_post: [B, D]
@@ -502,27 +510,61 @@ class DecoderStrongDistilRoberta(nn.Module):
         # Makes tuple of equally sized tensors of (batch x 1 x hidden_size)
         z_proj = torch.split(z_proj.unsqueeze(1), self.config.hidden_size, dim=2)
 
-        if x_in is None:
-            # TODO: implement auto-regressive forward
-            p_x_z_params = self.auto_regressive_forward(z=z_proj)
-        else:
-            input_ids, attention_mask = x_in
-            # In case we have a multi sample forward, we need to repeat X to match shape with z
-            input_ids_2d_exp = input_ids.repeat(S, 1, 1).reshape(S*B, -1)
-            attention_mask_2d_exp = attention_mask.repeat(S, 1, 1).reshape(S*B, -1)
+        input_ids, attention_mask = x_in
+        # In case we have a multi sample forward, we need to repeat X to match shape with z
+        input_ids_2d_exp = input_ids.repeat(S, 1, 1).reshape(S*B, -1)
+        attention_mask_2d_exp = attention_mask.repeat(S, 1, 1).reshape(S*B, -1)
 
-            out = self.roberta_model(z=z_proj, input_ids=input_ids_2d_exp,
-                                     attention_mask=attention_mask_2d_exp, return_dict=True)
+        out = self.roberta_model(z=z_proj, input_ids=input_ids_2d_exp,
+                                 attention_mask=attention_mask_2d_exp, return_dict=True)
 
-            p_x_z_params = out.logits
-            p_x_z_params = p_x_z_params.reshape(S, B, self.L, self.V)
-            # cut of prediction for last token
-            p_x_z_params = p_x_z_params[:, :, :-1, :]
+        p_x_z_params = out.logits
+        p_x_z_params = p_x_z_params.reshape(S, B, self.L, self.V)
+        # cut of prediction for last token
+        p_x_z_params = p_x_z_params[:, :, :-1, :]
 
         return p_x_z_params
 
-    def auto_regressive_forward(self, z):
-        raise NotImplementedError
+    def auto_regressive_forward(self, z, Sx=1):
+        Sz, B, D = z.shape
+        DEVICE = z.device
+
+        # [Sx*Sz*B, D], with the dimensions being of order Sx, S
+        z_2d = z.reshape(Sz*B, D).repeat(Sx, 1)
+        z_proj = self.latent_to_memory_projection(z_2d)
+        # Makes tuple of equally sized tensors of (batch x 1 x hidden_size)
+        z_proj = torch.split(z_proj.unsqueeze(1), self.config.hidden_size, dim=2)
+
+        # Add <s>
+        bos_token_id = 0
+
+        # [Sx*Sz*B, 1]
+        input_ids = torch.tensor([[bos_token_id] for _ in range(Sz*Sx*B)])
+        input_ids = input_ids.to(DEVICE)
+        generated_so_far = []
+
+        # Init with nothing
+        past_key_values = None
+
+        # Sequence length includes start and end token
+        for i in range(self.L - 1):
+            decoder_outs = self.roberta_model(z=z_proj,
+                                              input_ids=input_ids,
+                                              attention_mask=None,
+                                              past_key_values=past_key_values)
+
+            past_key_values = decoder_outs.past_key_values
+            sample = td.Categorical(logits=decoder_outs.logits[:, -1, :]).sample().unsqueeze(1)
+            input_ids = sample
+
+            generated_so_far.append(sample)
+
+        generated_so_far = torch.cat(generated_so_far, dim=1)
+        generated_so_far = generated_so_far.reshape(Sx, Sz, B, -1)
+
+        p_x_z = AutoRegressiveRobertaStrongDecoder(strong_decoder=self, z=z, sample=generated_so_far)
+
+        return p_x_z
 
 
 class DecoderWeakDistilRoberta(nn.Module):
@@ -575,3 +617,5 @@ class DecoderWeakDistilRoberta(nn.Module):
         p_x_z_params = p_x_z_params[:, :, :-1, :]
 
         return p_x_z_params, length_logits
+
+

@@ -3,6 +3,30 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.distributions as td
 
+class AutoRegressiveRobertaStrongDecoder(nn.Module):
+    def __init__(self, strong_decoder, z, sample=None):
+        super(AutoRegressiveRobertaStrongDecoder, self).__init__()
+
+        self.z = z
+        self.L = strong_decoder.L
+        self.Sz, self.B, self.D = self.z.shape
+        self.strong_decoder = strong_decoder
+
+        # will be of shape [Sx, Sz, B, D]
+        self.sampled_x = sample
+
+    def sample(self, sample_shape=(1,)):
+        assert len(sample_shape) == 1, "we only support 1D sample shapes, i.e. of shape (Sx,)"
+
+        Sx = sample_shape[0]
+        if self.sampled_x is not None:
+            if self.sampled_x.shape == (Sx, self.Sz, self.B, self.L - 1):
+                return self.sampled_x
+
+        p_x_z = self.strong_decoder.auto_regressive_forward(z=self.z, Sx=Sx)
+
+        return p_x_z.sampled_x
+
 
 class AutoRegressiveDistribution(nn.Module):
     def __init__(self, context, made, dist_type="gaussian", samples=None, params=None, encoder=True, X_shape=(1, 28, 28)):

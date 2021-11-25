@@ -106,7 +106,7 @@ class Objective(nn.Module):
             labels = x_in
 
         # Language: weak decoder (length model)
-        if self.args.decoder_network_type == "distil_roberta_weak_decoder":
+        if self.args.decoder_network_type == "weak_distil_roberta_decoder":
             assert type(p_x_z) == tuple, "we expect p_x_z may to be tuple of p_x_z and p_z_l"
             p_x_z, p_z_l = p_x_z
 
@@ -121,7 +121,7 @@ class Objective(nn.Module):
             # [S, B, L] -> [S, B]
             log_p_x_z = (log_p_x_z * label_mask).sum(dim=-1)
 
-            if self.args.decoder_network_type == "distil_roberta_weak_decoder":
+            if self.args.decoder_network_type == "weak_distil_roberta_decoder":
                 #print("p_z_l", p_z_l.logits.shape)
 
                 log_p_l_z = p_z_l.log_prob(label_length)
@@ -332,8 +332,8 @@ class Objective(nn.Module):
         # metric from InfoVAE paper (Zhao et al.)
         # for np.cov, the observation dimension is expected to be the column dimension
         z_post_np = z_post.squeeze(0).detach().cpu().numpy().transpose()
-        cov = np.cov(z_post_np)
-        log_det_cov_q_z = np.log(np.linalg.det(cov))
+        #cov = np.cov(z_post_np)
+        #log_det_cov_q_z = np.log(np.linalg.det(cov))
 
         d = dict(
             mean_mean=mean_mean,
@@ -342,7 +342,7 @@ class Objective(nn.Module):
             mean_scale=mean_scale,
             std_across_x_scale=std_across_x_scale,
             std_across_z_scale=std_across_z_scale,
-            log_det_cov_q_z=log_det_cov_q_z
+            # log_det_cov_q_z=log_det_cov_q_z
         )
 
         return d

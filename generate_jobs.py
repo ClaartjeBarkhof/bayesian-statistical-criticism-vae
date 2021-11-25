@@ -9,7 +9,7 @@ batch = slurmjobs.SlurmBatch(
 run_script, job_paths = batch.generate([
     ("decoder_network_type", ["strong_distil_roberta_decoder", "weak_distil_roberta_decoder"])],
     batch_size=64,
-    beta_beta=0.0,
+    beta_beta=1.0,
     # mdr_value=4.0,
     # mdr_constraint_optim_lr=0.001,
     checkpointing=True,
@@ -74,7 +74,7 @@ slurmjobs.util.summary(run_script, job_paths)
 basic_stuff = """#!/bin/bash
 #SBATCH -p gpu
 #SBATCH --gpus=1
-#SBATCH -t 03:00:00
+#SBATCH -t 01:00:00
 #SBATCH --mem 10G
 #SBATCH --output /home/cbarkhof/slurm-logs/%j-slurm-log.out
 

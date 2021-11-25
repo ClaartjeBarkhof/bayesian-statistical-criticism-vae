@@ -21,7 +21,7 @@ class Trainer:
 
         #
         if self.args.image_or_language == "language":
-            max_samples_in_mem = 200
+            max_samples_in_mem = 128
             batch_size = int(np.floor(max_samples_in_mem / self.args.iw_n_samples))
         else:
             batch_size = self.args.batch_size
@@ -83,8 +83,6 @@ class Trainer:
         return cls(params=parameters, lr=lr, weight_decay=l2_weight)
 
     def shared_step(self, x_in):
-        self.vae_model.eval()
-
         # language
         if type(x_in) == dict:
             x_in = (x_in["input_ids"].to(self.device), x_in["attention_mask"].to(self.device))
@@ -121,6 +119,8 @@ class Trainer:
         return loss_dict
 
     def validation_step(self, batch):
+        self.vae_model.eval()
+
         with torch.no_grad():
             return self.shared_step(batch)
 
@@ -165,11 +165,12 @@ class Trainer:
                     if self.args.short_dev_run and batch_idx == 2:
                         break
 
-                if phase == "valid" and epoch % self.args.eval_ll_every_n_epochs == 0:
-                    iw_lls = self.vae_model.estimate_log_likelihood_dataset(self.eval_ll_data_loader,
-                                                                            n_samples=self.args.iw_n_samples,
-                                                                            short_dev_run=self.args.short_dev_run)
-                    epoch_stats["iw_ll"] = iw_lls
+                # if phase == "valid" and epoch % self.args.eval_ll_every_n_epochs == 0:
+                #     iw_lls = self.vae_model.estimate_log_likelihood_dataset(self.eval_ll_data_loader,
+                #                                                             n_samples=self.args.iw_n_samples,
+                #                                                             image_or_language=self.args.image_or_language,
+                #                                                             short_dev_run=self.args.short_dev_run)
+                #     epoch_stats["iw_ll"] = iw_lls
 
                 # W&B Log epoch statistics as <phase>_epoch/<metric>
                 mean_reduced_epoch_stats = utils.reduce_and_log_epoch_stats(epoch_stats, phase, epoch, step,
