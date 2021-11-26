@@ -505,15 +505,19 @@ class DecoderStrongDistilRoberta(nn.Module):
         self.latent_to_memory_projection = nn.Linear(self.D, self.config.hidden_size * self.config.num_hidden_layers)
         self.latent_to_memory_projection.weight.data.normal_(mean=0.0, std=self.config.initializer_range)
 
+        self.latent_to_embedding_projection = nn.Linear(self.D, self.config.hidden_size)
+        self.latent_to_embedding_projection.weight.data.normal_(mean=0.0, std=self.config.initializer_range)
+
     def forward(self, z, x_in=None):
         assert z.dim() == 3, f"we assume z to be 3D, current shape {z.shape}"
+        assert z.shape[0] == 1, f"currently only support 1 latent sample per data point x"
         # x_in: [B, L, H]
         # z_post: [B, D]
 
         (S, B, D) = z.shape
         # Both z_2d and x_exp_2d need to have a sample dimension integrated in the first "batch" dimension = S*B
         # z_2d = z.reshape(S * B, D)
-        z
+        z_2d = z.squeeze(0)
 
         z_proj = self.latent_to_memory_projection(z_2d)
         # Makes tuple of equally sized tensors of (batch x 1 x hidden_size)
@@ -521,14 +525,23 @@ class DecoderStrongDistilRoberta(nn.Module):
 
         input_ids, attention_mask = x_in
         # In case we have a multi sample forward, we need to repeat X to match shape with z
-        input_ids_2d_exp = input_ids.repeat(S, 1, 1).reshape(S*B, -1)
-        attention_mask_2d_exp = attention_mask.repeat(S, 1, 1).reshape(S*B, -1)
+        # input_ids_2d_exp = input_ids.repeat(S, 1, 1).reshape(S*B, -1)
+        # attention_mask_2d_exp = attention_mask.repeat(S, 1, 1).reshape(S*B, -1)
 
-        out = self.roberta_model(z=z_proj, input_ids=input_ids_2d_exp,
-                                 attention_mask=attention_mask_2d_exp, return_dict=True)
+        latent_to_embeddings = self.latent_to_embedding_projection(z_2d)
+
+        # print("latent embedding shape", latent_to_embeddings.shape)
+        # print("z_proj[0].shape", z_proj[0].shape)
+        # print("attention_mask.shape", attention_mask.shape)
+        # print("input_ids.shape", input_ids.shape)
+
+        out = self.roberta_model(latent_embedding=latent_to_embeddings, z=z_proj, input_ids=input_ids,
+                                 attention_mask=attention_mask, return_dict=True)
 
         p_x_z_params = out.logits
-        p_x_z_params = p_x_z_params.reshape(S, B, self.L, self.V)
+        # p_x_z_params = p_x_z_params.reshape(S, B, self.L, self.V)
+        p_x_z_params = p_x_z_params.unsqueeze(0)
+
         # cut of prediction for last token
         p_x_z_params = p_x_z_params[:, :, :-1, :]
 

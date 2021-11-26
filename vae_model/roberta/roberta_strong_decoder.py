@@ -800,6 +800,7 @@ class VaeStrongDecoderRobertaModel(RobertaPreTrainedModel):
     def forward(
             self,
             z=None,
+            latent_embedding=None,
             input_ids=None,
             attention_mask=None,
             token_type_ids=None,
@@ -900,6 +901,13 @@ class VaeStrongDecoderRobertaModel(RobertaPreTrainedModel):
             inputs_embeds=inputs_embeds,
             past_key_values_length=past_key_values_length,
         )
+
+        # >>>> Claartje code
+        # If latent is added via embeddings it is simply summed with the input embeddings / initial hidden states
+        if latent_embedding is not None:
+            embedding_output += latent_embedding.unsqueeze(1)
+        # <<<< Claartje code
+
         encoder_outputs = self.encoder(
             hidden_states=embedding_output,
             z=z,
@@ -958,6 +966,7 @@ class VaeStrongDecoderRobertaForCausalLM(RobertaPreTrainedModel):
 
     def forward(
             self,
+            latent_embedding=None,
             z=None,
             input_ids=None,
             attention_mask=None,
@@ -1021,6 +1030,7 @@ class VaeStrongDecoderRobertaForCausalLM(RobertaPreTrainedModel):
             use_cache = False
 
         outputs = self.roberta(
+            latent_embedding=latent_embedding,
             input_ids=input_ids,
             z=z,
             attention_mask=attention_mask,

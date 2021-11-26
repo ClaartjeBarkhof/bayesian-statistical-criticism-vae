@@ -7,10 +7,13 @@ batch = slurmjobs.SlurmBatch(
 
 # generate jobs across parameter grid
 run_script, job_paths = batch.generate([
-    ("decoder_network_type", ["strong_distil_roberta_decoder", "weak_distil_roberta_decoder"])],
+    ("beta_beta", [0.0, 1.0]),
+    ("strong_roberta_decoder_embedding_dropout_prob", [0.5, 0.8])],
     batch_size=64,
-    beta_beta=1.0,
+    # beta_beta=0.0,
+    latent_dim=32,
     # mdr_value=4.0,
+    decoder_network_type="strong_distil_roberta_decoder", #"weak_memory_distil_roberta_decoder",
     # mdr_constraint_optim_lr=0.001,
     checkpointing=True,
     data_distribution="categorical",
@@ -24,7 +27,7 @@ run_script, job_paths = batch.generate([
     # free_bits=5.0,
     # free_bits_per_dimension=False,
     gen_l2_weight=0.0001,
-    gen_lr=0.0001,
+    gen_lr=0.00001,
     gen_momentum=0.0,
     gen_opt="adam",
     gpus=1,
@@ -32,14 +35,14 @@ run_script, job_paths = batch.generate([
     image_or_language="language",
     # image_w_h=28,
     inf_l2_weight=0.0001,
-    inf_lr=0.0001,
+    inf_lr=0.00001,
     inf_momentum=0.0,
     inf_opt="adam",
     # info_lambda_1_rate=0.5,
     # info_lambda_2_mmd=1.0,
     iw_n_samples=1,
     language_dataset_name="ptb",
-    latent_dim=128,
+    # latent_dim=768,
     log_every_n_steps=5,
     logging=True,
     max_epochs=120,
@@ -63,8 +66,9 @@ run_script, job_paths = batch.generate([
     # rate_constraint_lr=0.001,
     # rate_constraint_rel="ge",
     # rate_constraint_val=16.0,
-    run_name_prefix='TEST D-ROBERTA (24 nov) ',
+    run_name_prefix='',
     short_dev_run=False,
+    strong_roberta_decoder_embedding_dropout=True,
     tokenizer_name="roberta-base",
     vocab_size=50265,
     wandb_project="fall-2021-VAE")
@@ -74,7 +78,7 @@ slurmjobs.util.summary(run_script, job_paths)
 basic_stuff = """#!/bin/bash
 #SBATCH -p gpu
 #SBATCH --gpus=1
-#SBATCH -t 01:00:00
+#SBATCH -t 00:45:00
 #SBATCH --mem 10G
 #SBATCH --output /home/cbarkhof/slurm-logs/%j-slurm-log.out
 
