@@ -8,7 +8,7 @@ from vae_model.made import MADE
 from vae_model.sylvester_flows.models.layers import GatedConv2d
 
 from transformers.models.roberta.configuration_roberta import RobertaConfig
-from vae_model.roberta.roberta import RobertaModel
+from vae_model.roberta.roberta import RobertaModel, RobertaPooler2
 
 # --------------------------------------------------------------------------------------------------------------------
 # CONTENTS
@@ -120,8 +120,9 @@ class IndependentGaussianBlock(nn.Module):
         self.B = args.batch_size
         self.D = args.latent_dim
 
-        self.mean_layer = nn.Linear(256, self.D)
-        self.scale_layer = nn.Sequential(nn.Linear(256, self.D), nn.Softplus())
+        pre_bottle_neck_size = 256 if args.latent_dim < 256 else args.latent_dim
+        self.mean_layer = nn.Linear(pre_bottle_neck_size, self.D)
+        self.scale_layer = nn.Sequential(nn.Linear(pre_bottle_neck_size, self.D), nn.Softplus())
 
     def forward(self, q_z_x_params):
         mean = self.mean_layer(q_z_x_params)
@@ -280,6 +281,7 @@ class EncoderDistilRoberta(nn.Module):
         self.D = args.latent_dim
 
         checkpoint_name = "distilroberta-base"
+        # checkpoint_name = "roberta-base"
         config = RobertaConfig.from_pretrained(checkpoint_name)
 
         # make some important settings explicit
@@ -289,8 +291,11 @@ class EncoderDistilRoberta(nn.Module):
 
         self.roberta_model = RobertaModel(config=config).from_pretrained(pretrained_model_name_or_path=checkpoint_name,
                                                                          config=config)
+        # hacky overwrite
+        self.roberta_model.pooler = RobertaPooler2(config=config)
 
-        self.pooler_projection = nn.Linear(config.hidden_size, 256)
+        pre_bottle_neck_size = 256 if args.latent_dim < 256 else args.latent_dim
+        self.pooler_projection = nn.Linear(config.hidden_size, pre_bottle_neck_size)
 
     def forward(self, x_in):
         input_ids, attention_mask = x_in
@@ -300,5 +305,6 @@ class EncoderDistilRoberta(nn.Module):
 
         # [B, 256]
         q_z_x_params = self.pooler_projection(roberta_model_out.pooler_output)
+        # q_z_x_params = roberta_model_out.pooler_output
 
         return q_z_x_params

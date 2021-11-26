@@ -74,7 +74,10 @@ class Objective(nn.Module):
 
         (S, B, D) = z_post.shape
 
-        label_mask, label_length, p_z_l = None, None, None
+        label_mask, label_length, p_z_l, log_p_l_z = None, None, None, None
+
+        total_loss = None
+        loss_dict = dict()
 
         # Image: get labels for multinomial case
         if self.image_or_language == "image" and self.data_distribution == "multinomial":
@@ -87,12 +90,28 @@ class Objective(nn.Module):
 
         # Language: apply some masking
         elif self.image_or_language == "language":
+
+
             input_ids, attention_mask = x_in
-            # [S, B, L]
-            labels = input_ids[:, 1:].unsqueeze(0)
-            label_mask = attention_mask[:, 1:].unsqueeze(0)
-            # [S, B]
-            label_length = label_mask.sum(dim=-1).long()
+
+            # strong decoder: next token prediction
+            if self.args.decoder_network_type == "strong_distil_roberta_decoder":
+                # [S, B, L-1]
+                labels = input_ids[:, 1:].unsqueeze(0).long()  # categorical labels need to be long
+                label_mask = attention_mask[:, 1:].unsqueeze(0).float()  # mask values need to be float
+
+            # weak decoder: same token prediction
+            else:
+                # [S, B, L]
+                labels = input_ids.unsqueeze(0).long()  # categorical labels need to be long
+
+                # attention mask has 1 for non-masked, 1 for masked tokens
+                # mask in this context means <pad> and has nothing to do with masked language modelling
+                # it is just the contour of the sequences in a block of fixed length sequences
+                label_mask = attention_mask.unsqueeze(0).float()  # mask values need to be float
+
+                # [S, B]
+                label_length = label_mask.sum(dim=-1).long()  # categorical labels need to be long
 
             # print("label_length.min", label_length.min())
             # print("label_length.max", label_length.max())
@@ -106,7 +125,7 @@ class Objective(nn.Module):
             labels = x_in
 
         # Language: weak decoder (length model)
-        if self.args.decoder_network_type == "weak_distil_roberta_decoder":
+        if self.args.decoder_network_type in ["weak_distil_roberta_decoder", "weak_memory_distil_roberta_decoder"]:
             assert type(p_x_z) == tuple, "we expect p_x_z may to be tuple of p_x_z and p_z_l"
             p_x_z, p_z_l = p_x_z
 
@@ -115,27 +134,25 @@ class Objective(nn.Module):
 
         # Distortion [S, B] or [S, B, L]
         log_p_x_z = p_x_z.log_prob(labels)
-        #print("log_p_x_z 0", log_p_x_z.shape)
 
         if self.image_or_language == "language":
             # [S, B, L] -> [S, B]
             log_p_x_z = (log_p_x_z * label_mask).sum(dim=-1)
 
-            if self.args.decoder_network_type == "weak_distil_roberta_decoder":
-                #print("p_z_l", p_z_l.logits.shape)
+            if self.args.decoder_network_type in ["weak_distil_roberta_decoder", "weak_memory_distil_roberta_decoder"]:
 
                 log_p_l_z = p_z_l.log_prob(label_length)
 
-                #print("log_p_x_z 1", log_p_x_z.shape)
-                #print("label_length", label_length.shape)
+                loss_dict["log_p_l_z"] = log_p_l_z.mean().item()
+                loss_dict["log_p_x_z (without l)"] = log_p_x_z.mean().item()
 
-                #print("log_p_l_z", log_p_l_z.shape)
-
-                # this naming is a bit off but just to match the other code
+                # this naming is a bit off but just to match the other code (should have been p_x_z_l)
                 log_p_x_z = log_p_x_z + log_p_l_z
 
-        assert log_p_x_z.shape == (S, B), f"we assume p_x_z.log_prob shape to be be (S, B), currently {log_p_x_z.shape}"
-        # Average over samples and batch: [S, B] -> scalar (we mostly assume that S=1 actually)
+        assert log_p_x_z.shape == (1, B), f"we assume p_x_z.log_prob shape to be be (1, B), currently {log_p_x_z.shape}"
+
+        # Average over samples and batch: [S, B] -> scalar (we assume that S=1 actually)
+        # if S != 1 we should do a logsumexp(log_p_x_z, dim=0) - log(S)
         distortion = - log_p_x_z.mean()
 
         # TODO: self.free_bits_kl(p_z, q_z_x, z_post, free_bits=self.args.free_bits, per_dimension=False)
@@ -146,9 +163,6 @@ class Objective(nn.Module):
         mmd = self.maximum_mean_discrepancy(z_post, p_z)
 
         elbo = - (distortion + kl_prior_post)
-
-        total_loss = None
-        loss_dict = dict()
 
         if self.args.objective == "AE":
             total_loss = distortion

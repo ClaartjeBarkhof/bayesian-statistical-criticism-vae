@@ -5,6 +5,7 @@ import torch
 import numpy as np
 import torch.distributions as td
 
+from .tie_weights import tie_weights_fn
 
 class VaeModel(nn.Module):
     def __init__(self, args, device="cpu"):
@@ -23,6 +24,13 @@ class VaeModel(nn.Module):
         # VAE = Inference model (encoder) + generative model (decoder)
         self.inf_model = InferenceModel(args=args, device=device)
         self.gen_model = GenerativeModel(args=args, device=device)
+
+        # Weight tying / sharing between encoder and decoder RoBERTa part
+        # print("Tying encoder decoder RoBERTa checkpoint weights!")
+        # base_model_prefix = self.gen_model.decoder_network.roberta_model.base_model_prefix
+        # tie_weights_fn(self.inf_model.encoder_network.roberta_model,
+        #                self.gen_model.decoder_network.roberta_model._modules[base_model_prefix],
+        #                base_model_prefix)
 
     def forward(self, x_in, n_samples=1):
         # Infer the approximate posterior q(z|x) and sample from it to obtain z_post

@@ -85,12 +85,12 @@ def prepare_parser(jupyter=False, print_settings=True):
     # ----------------------------------------------------------------------------------------------------------------
     # OPTIMISATION
     parser.add_argument("--gen_opt", type=str, default="adam")
-    parser.add_argument("--gen_lr", type=float, default=1e-4)
+    parser.add_argument("--gen_lr", type=float, default=1e-5)
     parser.add_argument("--gen_l2_weight", type=float, default=1e-4)
     parser.add_argument("--gen_momentum", type=float, default=0.0)
 
     parser.add_argument("--inf_opt", type=str, default="adam")
-    parser.add_argument("--inf_lr", type=float, default=1e-4)
+    parser.add_argument("--inf_lr", type=float, default=1e-5)
     parser.add_argument("--inf_l2_weight", type=float, default=1e-4)
     parser.add_argument("--inf_momentum", type=float, default=0.0)
 
@@ -112,13 +112,19 @@ def prepare_parser(jupyter=False, print_settings=True):
                              "  - cond_pixel_cnn_pp (image):"
                              "      p(x_d|z, x<d)"
                              "  - strong_distil_roberta_decoder (language)"
-                             "  - weak_distil_roberta_decoder (language)")
+                             "  - weak_distil_roberta_decoder (language)"
+                             "  - weak_memory_distil_roberta_decoder (language)")
     parser.add_argument("--decoder_MADE_gating", default=True, type=lambda x: bool(distutils.util.strtobool(x)),
                         help="Whether or not to make use of (learned) gated addition of the context.")
     parser.add_argument("--decoder_MADE_gating_mechanism", default=0, type=int,
                         help="What gating mechanism to use for adding the latent as context:"
                              "  - 0: learned gate: h = act(t(h) + c(context) * sigmoid(gate_i))"
                              "  - 1: pixel cnn like gate: h = act( m_lin(h) + lin(z)) * sigmoid(m_lin(h) + lin(z))")
+    parser.add_argument("--strong_roberta_decoder_embedding_dropout", default=False,
+                        type=lambda x: bool(distutils.util.strtobool(x)),
+                        help="Whether or not to drop input embeddings at the decoder (word drop-out).")
+    parser.add_argument("--strong_roberta_decoder_embedding_dropout_prob", default=0.2, type=float,
+                        help="With what prob to drop input embeddings at the decoder (word drop-out prob).")
     parser.add_argument("--decoder_MADE_hidden_sizes", default="200-220", type=str,
                         help="Sizes of the hidden layers of the decoder MADE, format as H-H-H")
     parser.add_argument("--encoder_network_type", default="distil_roberta_encoder", type=str,
@@ -282,8 +288,21 @@ def make_run_name(args):
     else:
         obj = args.objective
 
-    name = f"{obj} | q(z|x) {args.q_z_x_type} | p(x|z) {args.decoder_network_type} | p(z) {args.p_z_type} | D = {args.latent_dim} | {date_time}"
+    # name = f"{obj} | q(z|x) {args.q_z_x_type} | p(x|z) {args.decoder_network_type} | p(z) {args.p_z_type} | D = {args.latent_dim} | {date_time}"
+    #strong_weak = "STRONG" if "strong" in args.decoder_network_type else "WEAK"
 
+    if "strong" in args.decoder_network_type:
+        strong_weak = "STRONG"
+    elif "mem" in args.decoder_network_type:
+        strong_weak = "MEM-WEAK"
+    else:
+        strong_weak = "WEAK"
+
+    name = f"(new pool + roberta-base + tie weights) {obj} | {strong_weak} | Nz={args.latent_dim}"
+
+    if "strong" in args.decoder_network_type and args.strong_roberta_decoder_embedding_dropout:
+        drop = f" | drop={args.strong_roberta_decoder_embedding_dropout_prob}"
+        name += drop
     # name = f"dec_made_hs {args.decoder_MADE_hidden_sizes} p(z) {args.p_z_type} D {args.latent_dim} | {date_time}"
 
     return args.run_name_prefix + name
@@ -304,7 +323,7 @@ def check_settings(args):
         assert not (args.image_or_language == "language" and not args.data_distribution == "categorical"), \
             f"If you are modelling language data, you are tied to a categorical dist., currently: {args.data_distribution}"
         assert not (args.image_or_language == "language" and not args.decoder_network_type in
-               ["strong_distil_roberta_decoder", "weak_distil_roberta_decoder"]), \
+               ["strong_distil_roberta_decoder", "weak_distil_roberta_decoder", "weak_memory_distil_roberta_decoder"]), \
                 "for language decoder must be of roberta type"
         assert not (args.image_or_language == "language" and not args.encoder_network_type == "distil_roberta_encoder"), \
             "distil_roberta_encoder is the only option for language now"
@@ -315,6 +334,7 @@ def check_settings(args):
 
     # Decoder network types
     decoder_network_type_options = ["basic_mlp_decoder", "basic_deconv_decoder", "conditional_made_decoder",
+                                    "weak_memory_distil_roberta_decoder",
                                     "cond_pixel_cnn_pp", "strong_distil_roberta_decoder", "weak_distil_roberta_decoder"]
     check_valid_option(args.decoder_network_type, decoder_network_type_options, "decoder_network_type")
 

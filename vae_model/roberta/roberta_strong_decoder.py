@@ -67,17 +67,23 @@ ROBERTA_PRETRAINED_MODEL_ARCHIVE_LIST = [
 ]
 
 
-class RobertaEmbeddings(nn.Module):
+class VaeStrongDecoderRobertaEmbeddings(nn.Module):
     """
     Same as BertEmbeddings with a tiny tweak for positional embeddings indexing.
     """
 
     # Copied from transformers.models.bert.modeling_bert.BertEmbeddings.__init__
-    def __init__(self, config):
+    def __init__(self, config, embedding_dropout=False, embedding_dropout_prob=0.2):
         super().__init__()
         self.word_embeddings = nn.Embedding(config.vocab_size, config.hidden_size, padding_idx=config.pad_token_id)
         self.position_embeddings = nn.Embedding(config.max_position_embeddings, config.hidden_size)
         self.token_type_embeddings = nn.Embedding(config.type_vocab_size, config.hidden_size)
+
+        print("embedding_dropout", embedding_dropout)
+        print("embedding_dropout_prob", embedding_dropout_prob)
+
+        self.drop_inputs_decoder = embedding_dropout
+        self.drop_inputs_decoder_prob = embedding_dropout_prob
 
         # self.LayerNorm is not snake-cased to stick with TensorFlow model variable name and be able to load
         # any TensorFlow checkpoint file
@@ -129,6 +135,14 @@ class RobertaEmbeddings(nn.Module):
 
         if inputs_embeds is None:
             inputs_embeds = self.word_embeddings(input_ids)
+
+        # Claartje: Input embedding drop-out
+        if self.drop_inputs_decoder and self.training:
+            batch_size, seq_len = input_ids.shape
+            mask = (torch.rand(batch_size, seq_len) > self.drop_inputs_decoder_prob).float().unsqueeze(2).to(input_ids.device)
+            inputs_embeds = inputs_embeds * mask
+
+
         token_type_embeddings = self.token_type_embeddings(token_type_ids)
 
         embeddings = inputs_embeds + token_type_embeddings
@@ -756,11 +770,12 @@ class VaeStrongDecoderRobertaModel(RobertaPreTrainedModel):
     _keys_to_ignore_on_load_missing = [r"position_ids"]
 
     # Copied from transformers.models.bert.modeling_bert.BertModel.__init__ with Bert->Roberta
-    def __init__(self, config, add_pooling_layer=True):
+    def __init__(self, config, add_pooling_layer=True, embedding_dropout=False, embedding_dropout_prob=0.2):
         super().__init__(config)
         self.config = config
 
-        self.embeddings = RobertaEmbeddings(config)
+        self.embeddings = VaeStrongDecoderRobertaEmbeddings(config, embedding_dropout=embedding_dropout,
+                                                            embedding_dropout_prob=embedding_dropout_prob)
         self.encoder = VaeStrongDecoderRobertaEncoder(config)
 
         self.pooler = RobertaPooler(config) if add_pooling_layer else None
@@ -919,13 +934,15 @@ class VaeStrongDecoderRobertaForCausalLM(RobertaPreTrainedModel):
     _keys_to_ignore_on_load_missing = [r"position_ids", r"lm_head.decoder.weight", r"lm_head.decoder.bias"]
     _keys_to_ignore_on_load_unexpected = [r"pooler"]
 
-    def __init__(self, config):
+    def __init__(self, config, embedding_dropout=False, embedding_dropout_prob=0.2):
         super().__init__(config)
 
         if not config.is_decoder:
             logger.warning("If you want to use `RobertaLMHeadModel` as a standalone, add `is_decoder=True.`")
 
-        self.roberta = VaeStrongDecoderRobertaModel(config, add_pooling_layer=False)
+        self.roberta = VaeStrongDecoderRobertaModel(config, add_pooling_layer=False,
+                                                    embedding_dropout=embedding_dropout,
+                                                    embedding_dropout_prob=embedding_dropout_prob)
         self.lm_head = RobertaLMHead(config)
 
         # The LM head weights require special treatment only when they are tied with the word embeddings

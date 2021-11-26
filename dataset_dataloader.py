@@ -31,7 +31,7 @@ class LanguageDataset:
         self.datasets = dict()
         self.encoded_datasets = dict()
 
-        if os.path.isdir(data_path):
+        if os.path.exists(data_path):
             print("Is file!")
             for split in ['train', 'validation', 'test']:
                 self.datasets[split] = load_from_disk(data_path + "/" + split)
@@ -53,6 +53,8 @@ class LanguageDataset:
             for split in ['train', 'validation', 'test']:
                 self.datasets[split] = self.datasets[split].map(self.convert_to_features, batched=True)
                 columns = ['attention_mask', 'input_ids']
+
+                print("--> data_path", data_path)
 
                 self.datasets[split].set_format(type='torch', columns=columns)
 

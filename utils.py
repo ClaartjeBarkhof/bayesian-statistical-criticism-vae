@@ -18,6 +18,7 @@ def init_logging(vae_model, args):
 
     phases = ["train", "valid"]
     metrics = ["total_loss", "mmd", "elbo", "mdr_loss", "mdr_multiplier", "distortion", "kl_fb",
+               "log_p_l_z", "log_p_x_z (without l)",
                "mmd_constraint_loss", "mmd_constraint_multiplier", "rate_constraint_multiplier",
                "rate_constraint_loss", "lambda_2_MMD", "lambda_1_Rate", "kl_prior_post", "iw_ll"]
 
@@ -43,7 +44,7 @@ def init_logging(vae_model, args):
 
     # scp -r cbarkhof@login-gpu.lisa.surfsara.nl:/home/cbarkhof/code-thesis/NewsVAE/Runs "/Users/claartje/Dropbox/XXXX Studie/Master AI/Thesis/code-thesis"
     # wandb.init(name=args.run_name, project=args.wandb_project, config=args)
-    # wandb.watch(vae_model) this gives an error on LISA
+    wandb.watch(vae_model)  # this gives an error on LISA
 
 
 # GET IMSHOW DATA
