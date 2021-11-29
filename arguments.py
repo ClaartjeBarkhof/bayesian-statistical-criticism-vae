@@ -294,11 +294,11 @@ def make_run_name(args):
     if "strong" in args.decoder_network_type:
         strong_weak = "STRONG"
     elif "mem" in args.decoder_network_type:
-        strong_weak = "MEM-WEAK"
+        strong_weak = "WEAK"
     else:
         strong_weak = "WEAK"
 
-    name = f"(new pool + distil-roberta-base) {obj} | {strong_weak} | Nz={args.latent_dim}"
+    name = f"{obj} | {strong_weak} | Nz={args.latent_dim}"
 
     if "strong" in args.decoder_network_type and args.strong_roberta_decoder_embedding_dropout:
         drop = f" | drop={args.strong_roberta_decoder_embedding_dropout_prob}"

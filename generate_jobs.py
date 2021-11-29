@@ -7,13 +7,12 @@ batch = slurmjobs.SlurmBatch(
 
 # generate jobs across parameter grid
 run_script, job_paths = batch.generate([
-    ("beta_beta", [0.0, 1.0]),
-    ("strong_roberta_decoder_embedding_dropout_prob", [0.5, 0.8])],
+    ("beta_beta", [0.0, 0.1, 0.5, 1.0, 1.5]),
+    ("decoder_network_type", ["weak_memory_distil_roberta_decoder", "strong_distil_roberta_decoder"])],
     batch_size=64,
-    # beta_beta=0.0,
-    latent_dim=32,
+    # beta_beta=0.1,
+    latent_dim=128,
     # mdr_value=4.0,
-    decoder_network_type="strong_distil_roberta_decoder", #"weak_memory_distil_roberta_decoder",
     # mdr_constraint_optim_lr=0.001,
     checkpointing=True,
     data_distribution="categorical",
@@ -55,7 +54,7 @@ run_script, job_paths = batch.generate([
     # mmd_constraint_rel="le",
     # mmd_constraint_val=0.001,
     # mog_n_components=5,
-    n_channels=1,
+    # n_channels=1,
     num_workers=3,
     objective="BETA-VAE",
     pin_memory=True,
@@ -66,9 +65,9 @@ run_script, job_paths = batch.generate([
     # rate_constraint_lr=0.001,
     # rate_constraint_rel="ge",
     # rate_constraint_val=16.0,
-    run_name_prefix='',
+    run_name_prefix='(29-nov ptb-beta-vae) ',
     short_dev_run=False,
-    strong_roberta_decoder_embedding_dropout=True,
+    strong_roberta_decoder_embedding_dropout=False,
     tokenizer_name="roberta-base",
     vocab_size=50265,
     wandb_project="fall-2021-VAE")
@@ -78,7 +77,7 @@ slurmjobs.util.summary(run_script, job_paths)
 basic_stuff = """#!/bin/bash
 #SBATCH -p gpu
 #SBATCH --gpus=1
-#SBATCH -t 00:45:00
+#SBATCH -t 03:00:00
 #SBATCH --mem 10G
 #SBATCH --output /home/cbarkhof/slurm-logs/%j-slurm-log.out
 

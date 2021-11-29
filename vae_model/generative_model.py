@@ -675,6 +675,9 @@ class DecoderWeakMemoryDistilRoberta(nn.Module):
         self.latent_to_memory_projection = nn.Linear(self.D, self.config.hidden_size * self.config.num_hidden_layers)
         self.latent_to_memory_projection.weight.data.normal_(mean=0.0, std=self.config.initializer_range)
 
+        self.latent_to_embedding_projection = nn.Linear(self.D, self.config.hidden_size)
+        self.latent_to_embedding_projection.weight.data.normal_(mean=0.0, std=self.config.initializer_range)
+
         self.latent_to_length = nn.Linear(self.D, self.L+1)
 
     def forward(self, z, x_in=None):
@@ -695,6 +698,11 @@ class DecoderWeakMemoryDistilRoberta(nn.Module):
         # Makes tuple of equally sized tensors of (batch x 1 x hidden_size)
         z_proj = torch.split(z_proj.unsqueeze(1), self.config.hidden_size, dim=2)
 
+        latent_to_embeddings = self.latent_to_embedding_projection(z_2d)
+
+        # print("latent_to_embeddings.shape", latent_to_embeddings.shape)
+        # print("z_proj[0].shape", z_proj[0].shape)
+
         # tok = RobertaTokenizer.from_pretrained("distilroberta-base")
         # tok.mask_token, tok.mask_token_id -> <mask> = 50264
         inputs_embeds = None
@@ -705,11 +713,13 @@ class DecoderWeakMemoryDistilRoberta(nn.Module):
             input_tokens[input_tokens == 0.0] = self.config.pad_token_id
             inputs_embeds = self.roberta_model.roberta.embeddings.word_embeddings(input_tokens)
 
+        # print("input_embeds.shape", inputs_embeds.shape)
+
         #print("z_proj[0].shape", z_proj[0].shape)
         #print("inputs_embeds.shape", inputs_embeds.shape)
 
         # we use the input_embeds to pass initial hidden states
-        out = self.roberta_model(z=z_proj, input_ids=None, attention_mask=None, inputs_embeds=inputs_embeds, return_dict=True)
+        out = self.roberta_model(latent_to_embeddings=latent_to_embeddings, z=z_proj, input_ids=None, attention_mask=None, inputs_embeds=inputs_embeds, return_dict=True)
 
         p_x_z_params = out.logits
 

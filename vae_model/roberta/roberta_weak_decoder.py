@@ -781,6 +781,7 @@ class VaeWeakMemoryDecoderRobertaModel(RobertaPreTrainedModel):
     def forward(
             self,
             z=None,
+            latent_to_embeddings=None,
             input_ids=None,
             attention_mask=None,
             token_type_ids=None,
@@ -881,6 +882,13 @@ class VaeWeakMemoryDecoderRobertaModel(RobertaPreTrainedModel):
             inputs_embeds=inputs_embeds,
             past_key_values_length=past_key_values_length,
         )
+
+        # >>>> Claartje code
+        # If latent is added via embeddings it is simply summed with the input embeddings / initial hidden states
+        if latent_to_embeddings is not None:
+            embedding_output += latent_to_embeddings.unsqueeze(1)
+        # <<<< Claartje code
+
         encoder_outputs = self.encoder(
             z=z,
             hidden_states=embedding_output,
@@ -939,7 +947,8 @@ class VaeWeakMemoryDecoderRobertaForMaskedLM(RobertaPreTrainedModel, ABC):
 
     def forward(
             self,
-            z,
+            latent_to_embeddings=None,
+            z=None,
             input_ids=None,
             attention_mask=None,
             token_type_ids=None,
@@ -964,6 +973,7 @@ class VaeWeakMemoryDecoderRobertaForMaskedLM(RobertaPreTrainedModel, ABC):
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
         outputs = self.roberta(
+            latent_to_embeddings=latent_to_embeddings,
             z=z,
             input_ids=input_ids,
             attention_mask=attention_mask,
