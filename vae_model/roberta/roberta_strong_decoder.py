@@ -79,8 +79,8 @@ class VaeStrongDecoderRobertaEmbeddings(nn.Module):
         self.position_embeddings = nn.Embedding(config.max_position_embeddings, config.hidden_size)
         self.token_type_embeddings = nn.Embedding(config.type_vocab_size, config.hidden_size)
 
-        print("embedding_dropout", embedding_dropout)
-        print("embedding_dropout_prob", embedding_dropout_prob)
+        #print("embedding_dropout", embedding_dropout)
+        #print("embedding_dropout_prob", embedding_dropout_prob)
 
         self.drop_inputs_decoder = embedding_dropout
         self.drop_inputs_decoder_prob = embedding_dropout_prob

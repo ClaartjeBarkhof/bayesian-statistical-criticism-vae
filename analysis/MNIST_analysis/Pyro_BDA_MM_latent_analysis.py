@@ -14,11 +14,14 @@ from mmm import Family, MixedMembershipRD, Plotting
 
 
 class MixedMembershipLatentAnalysis:
-    def __init__(self, run_names, all_latents, clean_names=None, device="cuda:0", seed=0, num_components=6):
+    def __init__(self, run_names, all_latents, clean_names=None, device="cuda:0",
+                 seed=0, num_components=6, DP_alpha=0.1):
 
         self.set_random_state(seed=seed)
         self.all_encodings = dict()
         self.device = device
+
+        self.DP_alpha = DP_alpha
 
         self.Sx, self.G, self.D = all_latents.shape
         self.all_latents = all_latents
@@ -46,7 +49,7 @@ class MixedMembershipLatentAnalysis:
                 cov_factor_loc=0., cov_factor_scale=10.,
                 delta=True),
             T=num_components,
-            DP_alpha=0.1,
+            DP_alpha=self.DP_alpha,
             device=torch.device(self.device))
         return model
 

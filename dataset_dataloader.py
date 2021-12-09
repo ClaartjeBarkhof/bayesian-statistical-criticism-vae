@@ -267,6 +267,8 @@ if __name__ == "__main__":
     # import matplotlib.pyplot as plt
     #
     config = prepare_parser(jupyter=False, print_settings=True)
+    config.language_dataset_name = "yahoo_answer"
+    config.image_or_language = "language"
     # dataset = ImageDataset(args=config)
     # loader = dataset.train_loader()
     #
@@ -277,7 +279,6 @@ if __name__ == "__main__":
     #     break
 
     if config.image_or_language == "language":
-        print("LANGUAGE!")
 
         dataset = LanguageDataset(args=config)
         train_loader = dataset.train_loader(shuffle=True, batch_size=8, num_workers=1)

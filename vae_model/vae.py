@@ -51,7 +51,8 @@ class VaeModel(nn.Module):
         q_z_x, z_post, p_z, p_x_z = self.forward(x_in, n_samples=Sz)
         return p_x_z.sample(sample_shape=(Sx,))
 
-    def estimate_log_likelihood_batch(self, x_in, n_samples=10, image_or_language="image", per_bit=False):
+    def estimate_log_likelihood_batch(self, x_in, n_samples=10, image_or_language="image",
+                                      decoder_network_type="strong_distil_roberta_decoder", per_bit=False):
         # dist, [S, B, D], dist, dist (or tuple of dist, dist)
         q_z_x, z_post, p_z, p_x_z = self(x_in, n_samples=n_samples)
 
@@ -65,6 +66,7 @@ class VaeModel(nn.Module):
         if image_or_language == "image":
             # [B, X_dim]
             if per_bit:
+
                 # Independent Bernoulli
                 if isinstance(p_x_z, td.Independent):
                     logits = p_x_z.base_dist.logits
@@ -97,8 +99,13 @@ class VaeModel(nn.Module):
             input_ids, attention_mask = x_in
 
             # [1, B, L]
-            labels = input_ids[:, 1:].unsqueeze(0)
-            label_mask = attention_mask[:, 1:].unsqueeze(0)
+            labels = input_ids.unsqueeze(0)
+            label_mask = attention_mask.unsqueeze(0)
+
+            # next word prediction
+            if "strong" in decoder_network_type:
+                labels = labels[:, :, 1:]
+                label_mask = label_mask[:, :, 1:]
 
             # [1, B]
             label_length = label_mask.sum(dim=-1).long()
@@ -106,10 +113,15 @@ class VaeModel(nn.Module):
             # weak decoder
             p_l_z = None
             weak_decoder = False
+
             if type(p_x_z) == tuple:
                 weak_decoder = True
                 # unpack
                 p_x_z, p_l_z = p_x_z
+
+            # p_x_z.logits [Sz, B, L, V]
+            # labels [1, B, L]
+            # label_length: [1, B]
 
             log_p_x_z = p_x_z.log_prob(labels)
             log_p_x_z = (log_p_x_z * label_mask).sum(dim=-1)

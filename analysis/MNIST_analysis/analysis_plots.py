@@ -52,7 +52,7 @@ def plot_posterior_analysis_grid(vae_model, data_X, data_y, n_sampled_reconstruc
 
 # --------------------------------------------------------------------------------------
 # Latent space
-def plot_latents(encodings, clean_name, plot_N_sep_posteriors=10, plot_N_encodings=200, save=None):
+def plot_latents(encodings, clean_name, plot_N_sep_posteriors=10, plot_N_dims = 10, plot_N_encodings=200, save=None):
     x = np.linspace(-4, 4, 500)
     y = scipy.stats.norm.pdf(x, 0, 1)
 
@@ -64,7 +64,7 @@ def plot_latents(encodings, clean_name, plot_N_sep_posteriors=10, plot_N_encodin
     std = encodings["scale"][:plot_N_encodings, :].cpu().numpy()
     std_mean = std.mean(axis=0)
 
-    plot_N_dims = 10
+
     fig, axs = plt.subplots(nrows=1, ncols=plot_N_dims, figsize=(plot_N_dims * 2, 8))
 
     dims = list(np.arange(plot_N_dims))

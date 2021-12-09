@@ -65,6 +65,7 @@ class GenerativeModel(nn.Module):
         if z is None:
             # [S, 1, D]
             z = self.sample_prior(S=Sz).to(device)
+
         # Conditional generation
         else:
             assert z.dim() == 3, f"we expect z always to be 3d [S, B, D], shape received {z.shape}"
@@ -75,6 +76,16 @@ class GenerativeModel(nn.Module):
         # a bit of a hack: make some sort of autoregressive distribution here as well
         if self.decoder_network_type == "cond_pixel_cnn_pp":
             sampled_x = self.decoder_network.sample
+
+        elif self.decoder_network_type == "weak_memory_distil_roberta_decoder":
+            # dist, [S, B]
+            p_x_z, lengths = p_x_z
+            # Sx, Sz, B, L
+            sampled_x = p_x_z.sample(sample_shape=(Sx,))
+
+            # cumulative sum over the length dimension, make lengths [1, Sz, B, 1]
+            mask = torch.cumsum(torch.ones_like(sampled_x), dim=-1) > lengths.unsqueeze(0).unsqueeze(-1)
+            sampled_x[mask] = self.decoder_network.config.pad_token_id
         else:
             sampled_x = p_x_z.sample(sample_shape=(Sx,))
 
@@ -174,16 +185,25 @@ class GenerativeModel(nn.Module):
 
                 # weak decoder
                 else:
-                    p_x_z_params, length_logits = p_x_z_params
-                    assert p_x_z_params.shape == (S, B, self.L, self.V), \
-                        f"categorical logits should be of shape (S, B, L, V), currently: {p_x_z_params.shape}"
-                    assert length_logits.shape == (S, B, self.L+1), \
-                        f"we expect length_logits to be of shape (S, B, L+1), currently: {length_logits.shape}"
-                    # no independent because masking needs to happen still, so the seq. dim. should stay
-                    p_x_z = td.Categorical(logits=p_x_z_params)
-                    p_z_l = td.Categorical(logits=length_logits)
-                    p_x_z = (p_x_z, p_z_l)
-
+                    if x_in is not None:
+                        p_x_z_params, length_logits = p_x_z_params
+                        assert p_x_z_params.shape == (S, B, self.L, self.V), \
+                            f"categorical logits should be of shape (S, B, L, V), currently: {p_x_z_params.shape}"
+                        assert length_logits.shape == (S, B, self.L+1), \
+                            f"we expect length_logits to be of shape (S, B, L+1), currently: {length_logits.shape}"
+                        # no independent because masking needs to happen still, so the seq. dim. should stay
+                        p_x_z = td.Categorical(logits=p_x_z_params)
+                        p_z_l = td.Categorical(logits=length_logits)
+                        p_x_z = (p_x_z, p_z_l)
+                    else:
+                        p_x_z_params, lengths = p_x_z_params
+                        assert p_x_z_params.shape == (S, B, self.L, self.V), \
+                            f"categorical logits should be of shape (S, B, L, V), currently: {p_x_z_params.shape}"
+                        assert lengths.shape == (S, B), \
+                            f"we expect length_logits to be of shape (S, B), currently: {lengths.shape}"
+                        # no independent because masking needs to happen still, so the seq. dim. should stay
+                        p_x_z = td.Categorical(logits=p_x_z_params)
+                        return (p_x_z, lengths)
         return p_x_z
 
     def get_p_z(self):
@@ -510,14 +530,15 @@ class DecoderStrongDistilRoberta(nn.Module):
 
     def forward(self, z, x_in=None):
         assert z.dim() == 3, f"we assume z to be 3D, current shape {z.shape}"
-        assert z.shape[0] == 1, f"currently only support 1 latent sample per data point x"
         # x_in: [B, L, H]
         # z_post: [B, D]
 
         (S, B, D) = z.shape
         # Both z_2d and x_exp_2d need to have a sample dimension integrated in the first "batch" dimension = S*B
-        # z_2d = z.reshape(S * B, D)
-        z_2d = z.squeeze(0)
+        z_2d = z.reshape(S * B, D)
+
+        # print("z.shape", z.shape)
+        # print("z_2d.shape", z_2d.shape)
 
         z_proj = self.latent_to_memory_projection(z_2d)
         # Makes tuple of equally sized tensors of (batch x 1 x hidden_size)
@@ -525,8 +546,14 @@ class DecoderStrongDistilRoberta(nn.Module):
 
         input_ids, attention_mask = x_in
         # In case we have a multi sample forward, we need to repeat X to match shape with z
-        # input_ids_2d_exp = input_ids.repeat(S, 1, 1).reshape(S*B, -1)
-        # attention_mask_2d_exp = attention_mask.repeat(S, 1, 1).reshape(S*B, -1)
+        input_ids_2d_exp = input_ids.repeat(S, 1, 1).reshape(S*B, -1)
+        attention_mask_2d_exp = attention_mask.repeat(S, 1, 1).reshape(S*B, -1)
+
+        # print("input_ids", input_ids.shape)
+        # print("input_ids_2d_exp", input_ids_2d_exp.shape)
+        #
+        # print("attention_mask", attention_mask.shape)
+        # print("attention_mask_2d_exp", attention_mask_2d_exp.shape)
 
         latent_to_embeddings = self.latent_to_embedding_projection(z_2d)
 
@@ -535,12 +562,12 @@ class DecoderStrongDistilRoberta(nn.Module):
         # print("attention_mask.shape", attention_mask.shape)
         # print("input_ids.shape", input_ids.shape)
 
-        out = self.roberta_model(latent_embedding=latent_to_embeddings, z=z_proj, input_ids=input_ids,
-                                 attention_mask=attention_mask, return_dict=True)
+        out = self.roberta_model(latent_embedding=latent_to_embeddings, z=z_proj, input_ids=input_ids_2d_exp,
+                                 attention_mask=attention_mask_2d_exp, return_dict=True)
 
         p_x_z_params = out.logits
-        # p_x_z_params = p_x_z_params.reshape(S, B, self.L, self.V)
-        p_x_z_params = p_x_z_params.unsqueeze(0)
+        p_x_z_params = p_x_z_params.reshape(S, B, self.L, self.V)
+        # p_x_z_params = p_x_z_params.unsqueeze(0)
 
         # cut of prediction for last token
         p_x_z_params = p_x_z_params[:, :, :-1, :]
@@ -681,8 +708,6 @@ class DecoderWeakMemoryDistilRoberta(nn.Module):
         self.latent_to_length = nn.Linear(self.D, self.L+1)
 
     def forward(self, z, x_in=None):
-        assert x_in is not None, f"we did not implement the case yet where x_in is None, " \
-                                 f"you need to sample from the length model in that case"
         assert z.dim() == 3, f"we assume z to be 3D, current shape {z.shape}"
         # x_in is ignored!
         # z_post: [B, D]
@@ -691,7 +716,7 @@ class DecoderWeakMemoryDistilRoberta(nn.Module):
         # Both z_2d and x_exp_2d need to have a sample dimension integrated in the first "batch" dimension = S*B
         z_2d = z.reshape(S * B, D)
 
-        # [S*B, L]
+        # [S*B, L+1]
         length_logits = self.latent_to_length(z_2d).reshape(S, B, -1)
 
         z_proj = self.latent_to_memory_projection(z_2d)
@@ -700,26 +725,34 @@ class DecoderWeakMemoryDistilRoberta(nn.Module):
 
         latent_to_embeddings = self.latent_to_embedding_projection(z_2d)
 
-        # print("latent_to_embeddings.shape", latent_to_embeddings.shape)
-        # print("z_proj[0].shape", z_proj[0].shape)
-
         # tok = RobertaTokenizer.from_pretrained("distilroberta-base")
         # tok.mask_token, tok.mask_token_id -> <mask> = 50264
-        inputs_embeds = None
+        inputs_embeds, lengths = None, None
         if x_in is not None:
             attention_mask = x_in[1].repeat(S, 1)
             input_tokens = attention_mask.clone()
             input_tokens[input_tokens == 1.0] = 50264
             input_tokens[input_tokens == 0.0] = self.config.pad_token_id
+            input_tokens = input_tokens.long()
             inputs_embeds = self.roberta_model.roberta.embeddings.word_embeddings(input_tokens)
 
-        # print("input_embeds.shape", inputs_embeds.shape)
+        # sample from the length model
+        else:
+            # [S*B, 1]
+            lengths = td.Categorical(logits=length_logits).sample().reshape(S*B, 1)
+            # [S*B, L]
+            input_tokens = torch.ones(S * B, self.L).to(length_logits.device)
+            idx = torch.cumsum(input_tokens, dim=1) > lengths
+            input_tokens[idx] = self.config.pad_token_id
+            input_tokens[~idx] = 50264
+            input_tokens = input_tokens.long()
 
-        #print("z_proj[0].shape", z_proj[0].shape)
-        #print("inputs_embeds.shape", inputs_embeds.shape)
+            inputs_embeds = self.roberta_model.roberta.embeddings.word_embeddings(input_tokens)
+            lengths = lengths.reshape(S, B)
 
         # we use the input_embeds to pass initial hidden states
-        out = self.roberta_model(latent_to_embeddings=latent_to_embeddings, z=z_proj, input_ids=None, attention_mask=None, inputs_embeds=inputs_embeds, return_dict=True)
+        out = self.roberta_model(latent_to_embeddings=latent_to_embeddings, z=z_proj,
+                                 input_ids=None, attention_mask=None, inputs_embeds=inputs_embeds, return_dict=True)
 
         p_x_z_params = out.logits
 
@@ -728,7 +761,12 @@ class DecoderWeakMemoryDistilRoberta(nn.Module):
 
         #print(p_x_z_params.shape)
 
-        # [S, B, L, V], [S, B, L]
-        return p_x_z_params, length_logits
+        if x_in is not None:
+            # [S, B, L, V], [S, B, L]
+            return p_x_z_params, length_logits
+
+        # we have sampled length already
+        else:
+            return p_x_z_params, lengths
 
 

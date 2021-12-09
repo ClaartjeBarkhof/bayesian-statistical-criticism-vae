@@ -7,11 +7,12 @@ batch = slurmjobs.SlurmBatch(
 
 # generate jobs across parameter grid
 run_script, job_paths = batch.generate([
-    ("beta_beta", [0.0, 0.1, 0.5, 1.0, 1.5]),
-    ("decoder_network_type", ["weak_memory_distil_roberta_decoder", "strong_distil_roberta_decoder"])],
+    ("beta_beta", [0.0, 0.1, 0.5, 1.0]),
+    ("strong_roberta_decoder_embedding_dropout_prob", [0.0, 0.5, 0.75])],
     batch_size=64,
+    decoder_network_type="strong_distil_roberta_decoder",
     # beta_beta=0.1,
-    latent_dim=128,
+    latent_dim=32,
     # mdr_value=4.0,
     # mdr_constraint_optim_lr=0.001,
     checkpointing=True,
@@ -40,7 +41,7 @@ run_script, job_paths = batch.generate([
     # info_lambda_1_rate=0.5,
     # info_lambda_2_mmd=1.0,
     iw_n_samples=1,
-    language_dataset_name="ptb",
+    language_dataset_name="yahoo_answer",
     # latent_dim=768,
     log_every_n_steps=5,
     logging=True,
@@ -65,9 +66,9 @@ run_script, job_paths = batch.generate([
     # rate_constraint_lr=0.001,
     # rate_constraint_rel="ge",
     # rate_constraint_val=16.0,
-    run_name_prefix='(29-nov ptb-beta-vae) ',
+    run_name_prefix='(29-nov drop ptb-beta-vae) ',
     short_dev_run=False,
-    strong_roberta_decoder_embedding_dropout=False,
+    strong_roberta_decoder_embedding_dropout=True,
     tokenizer_name="roberta-base",
     vocab_size=50265,
     wandb_project="fall-2021-VAE")

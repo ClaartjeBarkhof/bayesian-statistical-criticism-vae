@@ -26,7 +26,8 @@ class Trainer:
         else:
             batch_size = self.args.batch_size
 
-        self.eval_ll_data_loader = dataset.valid_loader(num_workers=self.args.num_workers, batch_size=batch_size, shuffle=False)
+        if dataset is not None:
+            self.eval_ll_data_loader = dataset.valid_loader(num_workers=self.args.num_workers, batch_size=batch_size, shuffle=False)
 
         self.vae_model = vae_model
         self.objective = Objective(args=args, device=self.device)  # this holds the constraint as well
@@ -208,10 +209,10 @@ class Trainer:
 
         results = dict()
 
-        for batch_idx, (X, y) in enumerate(loader):
+        for batch_idx, batch in enumerate(loader):
             print(f"{batch_idx:3d}/{len(loader)}", end="\r")
 
-            loss_dict = self.validation_step(X.to(device))
+            loss_dict = self.validation_step(batch)
 
             for k, v in loss_dict.items():
                 if k not in results:
