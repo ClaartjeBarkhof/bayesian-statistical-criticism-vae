@@ -202,3 +202,192 @@ class DPMixture:
         return self.posterior_predictive(rng_key_, y=None)["y"]
 
 
+def plot_all_groups_preds_obs(self):
+    post_preds = self.draw_posterior_predictions()
+
+    N_groups = len(self.group_names)
+
+    ncols = 5
+    nrows = int(np.ceil(N_groups / 5))
+
+    fig, axs = plt.subplots(ncols=ncols, nrows=nrows, figsize=(3 * ncols, 2 * nrows))
+
+    for g in range(N_groups):
+        row, col = g // ncols, g % ncols
+
+        preds_g = post_preds[:, self.obs_g == g]
+        obs_g = self.obs_y[self.obs_g == g]
+
+        axs[row, col].hist(np.array(preds_g).flatten(), bins=40, density=True, lw=0, label="preds", alpha=0.7,
+                           color="blue")
+        axs[row, col].hist(np.array(obs_g).flatten(), bins=40, density=True, lw=0, label="obs", alpha=0.7,
+                           color="lightblue")
+
+        axs[row, col].set_title(self.group_names[g], size=8)
+
+        if (col == ncols - 1) and (row == 0):
+            axs[row, col].legend(loc=(1.05, 0.8))
+
+    plt.tight_layout()
+    plt.show()
+
+
+def plot_model_data_preds_obs(self):
+    post_preds = self.draw_posterior_predictions()
+
+    ncols = 3
+    nrows = 1
+
+    c_dict = {
+        "data preds": "green",
+        "data obs": "lightgreen",
+        "model preds": "blue",
+        "model obs": "lightblue"
+    }
+
+    fig, axs = plt.subplots(ncols=ncols, nrows=nrows, figsize=(5 * ncols, 3 * nrows))
+
+    data_group_id = self.group_names.index("data_group")
+
+    preds_model_groups = post_preds[:, self.obs_g != data_group_id]
+    obs_model_groups = self.obs_y[self.obs_g != data_group_id]
+
+    preds_data_group = post_preds[:, self.obs_g == data_group_id]
+    obs_data_group = self.obs_y[self.obs_g == data_group_id]
+
+    axs[0].hist(np.array(preds_model_groups).flatten(), bins=40, density=True, lw=0, label="model preds",
+                color=c_dict["model preds"], alpha=0.7)
+    axs[0].hist(np.array(obs_model_groups).flatten(), bins=40, density=True, lw=0, label="model obs",
+                color=c_dict["model obs"], alpha=0.7)
+    axs[0].hist(np.array(preds_data_group).flatten(), bins=40, density=True, lw=0, label="data preds",
+                color=c_dict["data preds"], alpha=0.7)
+    axs[0].hist(np.array(obs_data_group).flatten(), bins=40, density=True, lw=0, label="data obs",
+                color=c_dict["data obs"], alpha=0.7)
+
+    axs[1].hist(np.array(preds_data_group).flatten(), bins=40, density=True, lw=0, label="data preds",
+                color=c_dict["data preds"], alpha=0.7)
+    axs[1].hist(np.array(obs_data_group).flatten(), bins=40, density=True, lw=0, label="data obs",
+                color=c_dict["data obs"], alpha=0.7)
+
+    axs[2].hist(np.array(preds_model_groups).flatten(), bins=40, density=True, lw=0, label="model preds",
+                color=c_dict["model preds"], alpha=0.7)
+    axs[2].hist(np.array(obs_model_groups).flatten(), bins=40, density=True, lw=0, label="model obs",
+                color=c_dict["model obs"], alpha=0.7)
+
+    axs[0].legend()
+    axs[1].legend()
+    axs[2].legend()
+
+    axs[0].set_title("Model and data groups obs & preds")
+    axs[1].set_title("Data group obs & preds")
+    axs[2].set_title("Model group obs & preds")
+
+    plt.tight_layout()
+    plt.show()
+
+
+def kl_component_dist_and_data_group_distance(self):
+    # [N_s, N_g, N_c]
+    omega = self.posterior_samples["omega"]
+    data_group_id = self.group_names.index("data_group")
+    omega_data_group = omega[:, data_group_id, :]
+
+    omega_tensor = torch.FloatTensor(np.array(omega))
+    omega_data_group_tensor = torch.FloatTensor(np.array(omega_data_group)).unsqueeze(1)
+
+    omega_dists = td.Categorical(probs=omega_tensor)
+    omega_data_group_dists = td.Categorical(probs=omega_data_group_tensor)
+
+    # [N_s, N_g, N_c] -> [N_s, N_g] -> [N_g]
+    kl = td.kl_divergence(omega_data_group_dists, omega_dists)
+    kl_avg = kl.mean(axis=0)  # avg sample dim
+
+    kl_order = np.argsort(kl_avg.numpy().flatten())
+    labels_reorder = np.array(self.group_names)[kl_order]
+
+    kl_comps_data_group = dict()
+    for i in range(len(labels_reorder)):
+        kl_comps_data_group[labels_reorder[i]] = kl_avg[kl_order][i].item()
+
+    return kl_comps_data_group
+
+def estimate_kl_densities_dp_mixture(dp_mixture):
+    # beta (1000, 77, 2)
+    # loc (1000, 3)
+    # loc_z (1000, 3850)
+    # omega (1000, 77, 3)
+    # scale (1000, 3)
+    # scale_z (1000, 3850)
+
+    # --------------------------------------------------------------------------------------------
+    # Sample from the posterior predictive of the data group
+
+    # [S, G, T]
+    omega = dp_mixture.posterior_samples["omega"]
+    S, G, T = omega.shape
+
+    # [S, T]
+    loc, scale = dp_mixture.posterior_samples["loc"], dp_mixture.posterior_samples["scale"]
+
+    idx_perm_1 = np.random.permutation(S)
+    idx_perm_2 = np.random.permutation(S)
+
+    data_group_idx = dp_mixture.group_names.index("data_group")
+
+    # Use the first indices to sample mixing coefficients of the data group
+    sampled_omega = omega[idx_perm_1, data_group_idx, :]
+    assert sampled_omega.shape == (S, 3), f"shape should be (S, 3), currently: {sampled_omega.shape}"
+    assert sampled_omega.sum(
+        axis=-1).mean() == 1.0, f"the sum of the mixing weights should be 1, currently: {sampled_omega.sum(dim=-1).mean()}"
+    sampled_components = td.Categorical(probs=torch.Tensor(np.array(sampled_omega))).sample().numpy()
+
+    # Use the second indices to sample component parameters of the sampled components
+    sampled_loc, sampled_scale = loc[idx_perm_2, sampled_components], scale[idx_perm_2, sampled_components]
+    sample_q_x = td.Normal(loc=torch.Tensor(np.array(sampled_loc)),
+                           scale=torch.Tensor(np.array(sampled_scale))).sample().numpy()
+
+    # --------------------------------------------------------------------------------------------
+    # Assess the samples under the densities of the data group
+    idx_perm_1 = np.random.permutation(S)
+    idx_perm_2 = np.random.permutation(S)
+
+    sampled_omega = omega[idx_perm_1, data_group_idx, :]
+    sampled_loc, sampled_scale = loc[idx_perm_2, :], scale[idx_perm_2, :]
+
+    q_mix = td.Categorical(probs=torch.Tensor(np.array(sampled_omega)))
+    q_comp = td.Normal(loc=torch.Tensor(np.array(sampled_loc)), scale=torch.Tensor(np.array(sampled_scale)))
+
+    # [S, T]
+    q_mixtures = td.MixtureSameFamily(q_mix, q_comp)
+    # [S]
+    log_q_samples = q_mixtures.log_prob(torch.Tensor(np.array(sample_q_x))).numpy()
+    log_q_samples_avg = logsumexp(log_q_samples) - np.log(S)
+
+    kl_density_est = dict()
+
+    # --------------------------------------------------------------------------------------------
+    # Assess the samples under the densities of the model groups
+    for model_group in dp_mixture.group_names:
+        if model_group == "data_group": continue
+        model_group_idx = dp_mixture.group_names.index(model_group)
+
+        idx_perm_1 = np.random.permutation(S)
+        idx_perm_2 = np.random.permutation(S)
+
+        sampled_omega = omega[idx_perm_1, model_group_idx, :]
+        sampled_loc, sampled_scale = loc[idx_perm_2, :], scale[idx_perm_2, :]
+
+        p_mix = td.Categorical(probs=torch.Tensor(np.array(sampled_omega)))
+        p_comp = td.Normal(loc=torch.Tensor(np.array(sampled_loc)), scale=torch.Tensor(np.array(sampled_scale)))
+
+        # [S, T]
+        p_mixtures = td.MixtureSameFamily(p_mix, p_comp)
+        # [S]
+        log_p_samples = p_mixtures.log_prob(torch.Tensor(np.array(sample_q_x))).numpy()
+        log_p_samples_avg = logsumexp(log_p_samples) - np.log(S)
+
+        kl_est = float(log_q_samples_avg - log_p_samples_avg)
+
+        kl_density_est[model_group] = kl_est
+
+    return kl_density_est
