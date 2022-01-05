@@ -5,34 +5,34 @@ checkpointing: false
 code_dir: /Users/claartje/Dropbox/Werk/2021 ILLC/marginal-kl-vae
 config_file: null
 data_dir: /Users/claartje/Dropbox/Werk/2021 ILLC/marginal-kl-vae/data
-data_distribution: bernoulli
+data_distribution: categorical
 ddp: false
 decoder_MADE_gating: true
 decoder_MADE_gating_mechanism: 0
 decoder_MADE_hidden_sizes: 200-220
-decoder_network_type: basic_deconv_decoder
+decoder_network_type: strong_distil_roberta_decoder
 encoder_MADE_hidden_sizes: 200-220
-encoder_network_type: basic_conv_encoder
+encoder_network_type: distil_roberta_encoder
 eval_ll_every_n_epochs: 1
 free_bits: 5.0
 free_bits_per_dimension: true
 gen_l2_weight: 0.0001
-gen_lr: 0.0001
+gen_lr: 1.0e-05
 gen_momentum: 0.0
 gen_opt: adam
-gpus: 0
+gpus: 1
 image_dataset_name: bmnist
-image_or_language: image
+image_or_language: language
 image_w_h: 28
 inf_l2_weight: 0.0001
-inf_lr: 0.0001
+inf_lr: 1.0e-05
 inf_momentum: 0.0
 inf_opt: adam
 info_lambda_1_rate: 1.0
 info_lambda_2_mmd: 100.0
 iw_n_samples: 50
 job_id: ''
-language_dataset_name: ptb_text_only
+language_dataset_name: ptb
 latent_dim: 32
 log_every_n_steps: 1
 logging: false
@@ -47,21 +47,22 @@ mmd_constraint_rel: le
 mmd_constraint_val: 0.005
 mog_n_components: 10
 n_channels: 1
-num_workers: 6
+num_workers: 2
 objective: VAE
-p_x_z_type: bernoulli
 p_z_type: isotropic_gaussian
+pin_memory: true
 print_every_n_steps: 1
 print_stats: true
 q_z_x_type: independent_gaussian
 rate_constraint_lr: 0.001
 rate_constraint_rel: eq
 rate_constraint_val: 16.0
-run_name: VAE | q(z|x) independent_gaussian | p(x|z) basic_deconv_decoder | p(z) isotropic_gaussian
-  | D = 32 | 2021-10-05-15:04:17
+run_name: VAE | STRONG | Nz=32
 run_name_prefix: ''
 short_dev_run: false
-tokenizer_name: roberta
+strong_roberta_decoder_embedding_dropout: false
+strong_roberta_decoder_embedding_dropout_prob: 0.2
+tokenizer_name: roberta-base
 vocab_size: 50265
 wandb_dir: /Users/claartje/Dropbox/Werk/2021 ILLC/marginal-kl-vae/run_files/
 wandb_project: fall-2021-VAE

@@ -250,7 +250,6 @@ class EncoderGatedConvolutionBlock(nn.Module):
 
         return q_z_x_params
 
-
 class EncoderMLPBlock(nn.Module):
     def __init__(self, args):
         super(EncoderMLPBlock, self).__init__()

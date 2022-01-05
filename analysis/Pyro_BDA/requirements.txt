@@ -1,7 +1,0 @@
-torch
-pyro-ppl
-tqdm
-numpy
-scipy
-matplotlib
-arviz

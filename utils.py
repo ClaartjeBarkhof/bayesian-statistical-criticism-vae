@@ -10,6 +10,12 @@ import torch
 import torch.nn.functional as F
 
 
+def get_wandb_runs(entity="fall-2021-vae-claartje-wilker", project="fall-2021-VAE"):
+    api = wandb.Api()
+    runs = api.runs(entity + "/" + project)
+    return runs
+
+
 def init_logging(vae_model, args):
     """Initialise W&B logging."""
     print("W&B INIT: RUN NAME", args.run_name)
