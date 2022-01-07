@@ -145,6 +145,7 @@ class VaeModel(nn.Module):
         self.eval()
 
         iw_lls = []
+        lens = []
         with torch.no_grad():
             for batch_idx, batch in enumerate(data_loader):
                 print(f"... calculating importance weighted (n_samples={n_samples})"
@@ -162,6 +163,7 @@ class VaeModel(nn.Module):
                 iw_ll = self.estimate_log_likelihood_batch(x_in=x_in, n_samples=n_samples, image_or_language=image_or_language)
 
                 iw_lls.append(iw_ll)
+                lens.append(batch["attention_mask"].sum(dim=-1))
 
                 if max_batches is not None and batch_idx + 1 == max_batches:
                     break
@@ -170,5 +172,6 @@ class VaeModel(nn.Module):
                     break
 
             iw_lls = torch.cat(iw_lls)
+            lens = torch.cat(lens).cpu()
 
-            return iw_lls.tolist()
+            return iw_lls.tolist(), lens.tolist()

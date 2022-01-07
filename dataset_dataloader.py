@@ -7,6 +7,7 @@ import numpy as np
 import torch
 import torch.utils.data as data_utils
 
+from arguments import prepare_parser
 from datasets import load_dataset, list_datasets, load_from_disk, ReadInstruction  # type: ignore
 from transformers import RobertaTokenizerFast  # type: ignore
 
@@ -313,19 +314,20 @@ def get_n_data_samples_x_y(image_dataset_name="bmnist", language_dataset_name="p
         return input_ids[:N_samples], attention_masks[:N_samples]
 
 
-def get_test_validation_loader(image_dataset_name="bmnist", language_dataset_name="ptb", shuffle=True,
-                               image_or_language="language", batch_size=100, num_workers=3, include_train=False):
+def get_test_validation_loader(dataset_name="bmnist", shuffle=True, batch_size=100, num_workers=3, include_train=False):
     args = prepare_parser(jupyter=True, print_settings=False)
 
     args.batch_size = batch_size
-    args.language_dataset_name = language_dataset_name
-    args.image_dataset_name = image_dataset_name
     args.num_workers = num_workers
 
-    if image_or_language == "image":
+    if dataset_name == "bmnist":
+        args.image_dataset_name = dataset_name
         dataset = ImageDataset(args=args)
-    else:
+    elif dataset_name == "ptb":
+        args.language_dataset_name = dataset_name
         dataset = LanguageDataset(args=args)
+    else:
+        raise NotImplementedError("get_test_validation_loader: only supporting PTB & BMNIST for now")
 
     data_loaders = dict(test=dataset.test_loader(shuffle=shuffle),
                         valid=dataset.valid_loader(shuffle=shuffle))

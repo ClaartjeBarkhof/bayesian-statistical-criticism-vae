@@ -167,7 +167,7 @@ class Trainer:
                         break
 
                 # if phase == "valid" and epoch % self.args.eval_ll_every_n_epochs == 0:
-                #     iw_lls = self.vae_model.estimate_log_likelihood_dataset(self.eval_ll_data_loader,
+                #     iw_lls, _ = self.vae_model.estimate_log_likelihood_dataset(self.eval_ll_data_loader,
                 #                                                             n_samples=self.args.iw_n_samples,
                 #                                                             image_or_language=self.args.image_or_language,
                 #                                                             short_dev_run=self.args.short_dev_run)
