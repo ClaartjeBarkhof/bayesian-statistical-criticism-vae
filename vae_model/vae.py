@@ -139,7 +139,9 @@ class VaeModel(nn.Module):
 
         return iw_ll
 
-    def estimate_log_likelihood_dataset(self, data_loader, n_samples=10, max_batches=None, image_or_language="image", short_dev_run=False):
+    def estimate_log_likelihood_dataset(self, data_loader, n_samples=10, max_batches=None,
+                                        decoder_network_type="strong_distil_roberta_decoder",
+                                        image_or_language="image", short_dev_run=False):
         print(f"Calculating importance weighted log likelihood "
               f"(n_samples={n_samples}, batch_size={data_loader.batch_size})!")
         self.eval()
@@ -154,16 +156,16 @@ class VaeModel(nn.Module):
                 # language
                 if type(batch) == dict:
                     x_in = (batch["input_ids"].to(self.device), batch["attention_mask"].to(self.device))
-
+                    lens.append(batch["attention_mask"].sum(dim=-1))
                 # image
                 else:
                     x_in = batch[0]
                     x_in = x_in.to(self.device)
 
-                iw_ll = self.estimate_log_likelihood_batch(x_in=x_in, n_samples=n_samples, image_or_language=image_or_language)
-
+                iw_ll = self.estimate_log_likelihood_batch(x_in=x_in, n_samples=n_samples,
+                                                           decoder_network_type=decoder_network_type,
+                                                           image_or_language=image_or_language)
                 iw_lls.append(iw_ll)
-                lens.append(batch["attention_mask"].sum(dim=-1))
 
                 if max_batches is not None and batch_idx + 1 == max_batches:
                     break
@@ -172,6 +174,8 @@ class VaeModel(nn.Module):
                     break
 
             iw_lls = torch.cat(iw_lls)
-            lens = torch.cat(lens).cpu()
+            # only for language
+            if len(lens) > 0:
+                lens = torch.cat(lens).cpu()
 
             return iw_lls.tolist(), lens.tolist()
