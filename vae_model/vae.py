@@ -176,6 +176,6 @@ class VaeModel(nn.Module):
             iw_lls = torch.cat(iw_lls)
             # only for language
             if len(lens) > 0:
-                lens = torch.cat(lens).cpu()
+                lens = torch.cat(lens).cpu().tolist()
 
-            return iw_lls.tolist(), lens.tolist()
+            return iw_lls.tolist(), lens

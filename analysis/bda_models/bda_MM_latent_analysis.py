@@ -206,8 +206,8 @@ def gather_alternative_statistics(encodings, N_encodings=2000, latent_dim=10):
 
     res = {}
 
-    # It's very easy to reject
-    for name, enc in encodings.items():
+    for i, (name, enc) in enumerate(encodings.items()):
+        print(f"{i}/{len(encodings)} - {name}")
         z = enc["z"][:, :N_encodings]
         loc = enc["mean"][:, :N_encodings]
         scale = enc["scale"][:, :N_encodings]
@@ -217,7 +217,7 @@ def gather_alternative_statistics(encodings, N_encodings=2000, latent_dim=10):
         one_sample_ks = st.kstest(z.flatten().cpu().numpy(), 'norm')
 
         # Kolmogorov-Smirnov statistic on 2 samples
-        two_sample_ks = st.ks_2samp(prior_data, z.flatten().cpu().numpy())
+        two_sample_ks = st.ks_2samp(prior_data.flatten().cpu().numpy(), z.flatten().cpu().numpy())
 
         mmd = MMD(prior_data, z, alphas=alphas, ret_matrix=False)
 
