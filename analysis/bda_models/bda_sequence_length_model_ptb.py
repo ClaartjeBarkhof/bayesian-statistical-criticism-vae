@@ -27,12 +27,15 @@ color_f = next(palette)
 
 class GenSeqLenModelPTB:
     def __init__(self, group_names: list, observations: list,
+                 N_valid=3370,
                  gamma_shape=[1., 1.], DP_alpha=1., num_comps=5,
                  num_samples=1000, num_chains=1, num_warmup=100):
 
         self.gamma_shape = gamma_shape
         self.DP_alpha = DP_alpha
         self.T = num_comps
+
+        self.N_valid=N_valid
 
         self.group_names = group_names
         self.G = len(group_names)
@@ -230,12 +233,12 @@ class GenSeqLenModelPTB:
         if local_samples is None:
             local_samples = self.infer_local_assignments(self.posterior_samples, self.y)
 
-        # [S, N_train_valid]
+        # [S, N_train + N_valid]
         rates = torch.FloatTensor(np.array(local_samples["rate_z"]))
 
         # [S, N_valid]
-        # this is a bit hacky, but the first half is valid data (other half is train data), both 2000 data points
-        rates_group_validation = torch.chunk(rates, 2, 1)[0]
+        # this is a bit hacky, but we have stored till what index the validation samples run
+        rates_group_validation = rates[:, :self.N_valid]
 
         rates_group_validation = torch.FloatTensor(np.array(rates_group_validation))
         S, N_group_validation = rates_group_validation.shape
@@ -243,7 +246,8 @@ class GenSeqLenModelPTB:
         # print(rates_group_validation.shape, S, N_group_validation)
 
         assert len(lengths) == N_group_validation, \
-            "lengths must have the same length as the number of validation posterior rates"
+            "lengths must have the same length as the number of validation posterior rates" \
+            f"currently, len(lengths) == {len(lengths)} and N_group_validation={N_group_validation}"
 
         poisson_validation = td.Poisson(rate=rates_group_validation)
 

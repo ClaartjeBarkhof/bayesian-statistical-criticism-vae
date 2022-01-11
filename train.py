@@ -89,6 +89,7 @@ class Trainer:
             x_in = (x_in["input_ids"].to(self.device), x_in["attention_mask"].to(self.device))
         # image
         else:
+            x_in, y = x_in
             x_in = x_in.to(self.device)
 
         q_z_x, z_post, p_z, p_x_z = self.vae_model(x_in)

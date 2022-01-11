@@ -13,7 +13,6 @@ sys.path.append("/home/cbarkhof/fall-2021/analysis/bda_models/Pyro_BDA/probabll/
 from mmm import Family, MixedMembershipRD, Plotting
 import scipy.stats as st
 import torch_two_sample as tts
-from tabulate import tabulate
 
 class MixedMembershipLatentAnalysis:
     def __init__(self, run_names, all_latents, clean_names=None, device="cuda:0",
@@ -65,7 +64,7 @@ class MixedMembershipLatentAnalysis:
         if plot_elbo:
             Plotting.elbo(self.model)
 
-    def plot_component_dist_groups(self, posterior_predict_n_samples=1000, figsize=(8, 16)):
+    def plot_component_dist_groups(self, posterior_predict_n_samples=1000, figsize=(8, 8f)):
         if self.posterior is None:
             with torch.no_grad():
                 self.posterior = self.model.posterior_predict(num_samples=posterior_predict_n_samples)
@@ -185,7 +184,6 @@ class MixedMembershipLatentAnalysis:
 
         return tts_mmd
 
-
 def kl_divergence(mu, std):
     """
     Calculates the KL-divergence between the posterior and the prior analytically.
@@ -195,7 +193,6 @@ def kl_divergence(mu, std):
     kl_loss = kl_loss.sum(dim=1).mean(dim=0)
 
     return kl_loss
-
 
 def gather_alternative_statistics(encodings, N_encodings=2000, latent_dim=10):
     alphas = [0.1 * i for i in range(1, 6)]
@@ -208,9 +205,12 @@ def gather_alternative_statistics(encodings, N_encodings=2000, latent_dim=10):
 
     for i, (name, enc) in enumerate(encodings.items()):
         print(f"{i}/{len(encodings)} - {name}")
-        z = enc["z"][:, :N_encodings]
-        loc = enc["mean"][:, :N_encodings]
-        scale = enc["scale"][:, :N_encodings]
+        z = enc["z"][:N_encodings]
+        loc = enc["mean"][:N_encodings]
+        scale = enc["scale"][:N_encodings]
+
+        if len(z) < N_encodings:
+            print(f"Warning, N_encodings < len(z), N_encodings={N_encodings}, len(z)={len(z)}")
 
         rate = kl_divergence(mu=loc, std=scale)
 
