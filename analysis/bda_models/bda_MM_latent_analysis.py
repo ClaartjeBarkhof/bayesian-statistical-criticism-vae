@@ -10,6 +10,8 @@ import pyro
 
 import sys
 sys.path.append("/home/cbarkhof/fall-2021/analysis/bda_models/Pyro_BDA/probabll/bda")
+
+import pandas as pd
 from mmm import Family, MixedMembershipRD, Plotting
 import scipy.stats as st
 import torch_two_sample as tts
@@ -27,14 +29,14 @@ class MixedMembershipLatentAnalysis:
         self.Sx, self.G, self.D = all_latents.shape
         self.all_latents = all_latents
 
+        self.obs_g = np.concatenate([[g] * self.Sx for g in range(self.G)])
+
         assert self.G == len(run_names), "len(run_names) must be equal to the number of groups inferred from all_latents"
 
         self.clean_names = list(clean_names) if clean_names is not None else list(run_names)
 
         self.model = self.get_model(num_components=num_components)
         self.posterior = None
-
-
 
     def set_random_state(self, seed):
         random.seed(seed)
@@ -64,7 +66,7 @@ class MixedMembershipLatentAnalysis:
         if plot_elbo:
             Plotting.elbo(self.model)
 
-    def plot_component_dist_groups(self, posterior_predict_n_samples=1000, figsize=(8, 8f)):
+    def plot_component_dist_groups(self, posterior_predict_n_samples=1000, figsize=(8, 8)):
         if self.posterior is None:
             with torch.no_grad():
                 self.posterior = self.model.posterior_predict(num_samples=posterior_predict_n_samples)

@@ -36,7 +36,8 @@ from random import shuffle
 
 
 class GenLDATopicModelPTB:
-    def __init__(self, train_samples_strings, num_topics=10, chunksize=2000, passes=20, iterations=600, eval_every=None):
+    def __init__(self, train_samples_strings, num_topics=10, chunksize=2000, passes=20, iterations=600,
+                 alpha=0.01, beta="auto", eval_every=None):
 
         # Pre-process the train samples
         self.dictionary, self.train_corpus, _, self.train_docs, self.num_tokens = self.create_lda_corpus(
@@ -48,8 +49,8 @@ class GenLDATopicModelPTB:
             corpus=self.train_corpus,
             id2word=self.id2token,
             chunksize=chunksize,
-            alpha='auto',
-            eta='auto',
+            alpha=alpha,
+            eta=beta,
             iterations=iterations,
             num_topics=num_topics,
             passes=passes,
@@ -170,7 +171,7 @@ class GenLDATopicModelPTB:
             "the corpus and conditioning corpus need to be equal length, because they are interpreted as pairs"
         gamma, _ = self.lda_model.inference(conditioning_corpus)
 
-        scores_all_docs, _ = self.lda_model.bound(corpus, gamma=gamma)
+        scores_all_docs, _ = self.lda_model.bound2(corpus, gamma=gamma)
 
         return scores_all_docs
 
@@ -185,7 +186,7 @@ class GenLDATopicModelPTB:
             shuffle(reference_corpus)
 
             gamma, _ = self.lda_model.inference(reference_corpus)
-            scores, _ = self.lda_model.bound(corpus, gamma=gamma)
+            scores, _ = self.lda_model.bound2(corpus, gamma=gamma)
 
             all_scores.append(np.array(scores))
 
