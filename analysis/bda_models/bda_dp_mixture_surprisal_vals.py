@@ -109,16 +109,19 @@ class DPMixture:
             elif "normal" in self.obs_dist or self.obs_dist == "student_t":
                 if self.obs_dist == "log_normal":
                     mean = 0.0
+                    std = 1.0
                 else:
                     mean = np.mean(self.obs_y)
+                    std = np.std(self.obs_y)
+                    print("mean:", mean, "std:", std)
 
                 # [T]
-                loc = numpyro.sample('loc', dist.Normal(mean, 1.0))
+                loc = numpyro.sample('loc', dist.Normal(mean, std))
                 idx = jnp.argsort(loc, -1)  # , -1
                 loc = loc[idx]
 
                 # scale = numpyro.sample('scale', dist.Gamma(1, 10))
-                scale = numpyro.sample('scale', dist.Uniform(0.1, 20))
+                scale = numpyro.sample('scale', dist.Uniform(0.1, std*2.0)) # was 20.0
                 # scale = scale[idx]
 
                 # degrees of freedom
@@ -189,9 +192,9 @@ class DPMixture:
         if self.prior_predictive is None:
             self.prior_predictive = Predictive(self.model, num_samples=num_prior_samples)
 
-    def draw_prior_predictions(self):
+    def draw_prior_predictions(self, num_samples=100):
         if self.prior_predictive is None:
-            self.make_prior_predictive()
+            self.make_prior_predictive(num_prior_samples=num_samples)
         rng_key, rng_key_ = random.split(self.rng_key)
         return self.prior_predictive(rng_key_, y=None)
 
@@ -208,8 +211,11 @@ class DPMixture:
         return self.posterior_predictive(rng_key_, y=None)
 
 
-def plot_all_groups_preds_obs(self):
-    post_preds = self.draw_posterior_predictions()["y"]
+def plot_all_groups_preds_obs(self, prior=False, num_prior_samples=400):
+    if prior:
+        preds = self.draw_prior_predictions(num_samples=num_prior_samples)["y"]
+    else:
+        preds = self.draw_posterior_predictions()["y"]
 
     N_groups = len(self.group_names)
 
@@ -221,7 +227,7 @@ def plot_all_groups_preds_obs(self):
     for g in range(N_groups):
         row, col = g // ncols, g % ncols
 
-        preds_g = post_preds[:, self.obs_g == g]
+        preds_g = preds[:, self.obs_g == g]
         obs_g = self.obs_y[self.obs_g == g]
 
         axs[row, col].hist(np.array(preds_g).flatten(), bins=40, density=True, lw=0, label="preds", alpha=0.7,
@@ -238,8 +244,11 @@ def plot_all_groups_preds_obs(self):
     plt.show()
 
 
-def plot_model_data_preds_obs(self):
-    post_preds = self.draw_posterior_predictions()["y"]
+def plot_model_data_preds_obs(self, prior=False, num_prior_samples=400):
+    if prior:
+        preds = self.draw_prior_predictions(num_samples=num_prior_samples)["y"]
+    else:
+        preds = self.draw_posterior_predictions()["y"]
 
     ncols = 3
     nrows = 1
@@ -255,10 +264,10 @@ def plot_model_data_preds_obs(self):
 
     data_group_id = self.group_names.index("data_group")
 
-    preds_model_groups = post_preds[:, self.obs_g != data_group_id]
+    preds_model_groups = preds[:, self.obs_g != data_group_id]
     obs_model_groups = self.obs_y[self.obs_g != data_group_id]
 
-    preds_data_group = post_preds[:, self.obs_g == data_group_id]
+    preds_data_group = preds[:, self.obs_g == data_group_id]
     obs_data_group = self.obs_y[self.obs_g == data_group_id]
 
     axs[0].hist(np.array(preds_model_groups).flatten(), bins=40, density=True, lw=0, label="model preds",
