@@ -27,5 +27,5 @@
     - `latent_analysis.py`: some functions that help in `latent_space_analysis.ipynb`
     - `image_encoding_stats.csv`: stores some basic statistics of the image encodings (KS, MMD, etc.)
     - `language_encoding_stats.csv`: stores some basic statistics of the language (KS, MMD, etc.)
-  - final_selection_runs.csv: file that stores the experiments used in the analysis
-  - global_stats.csv: file that stores aggregated intrinsic evaluation results used in the analysis
+  - `final_selection_runs.csv`: file that stores the experiments used in the analysis
+  - `global_stats.csv`: file that stores aggregated intrinsic evaluation results used in the analysis
