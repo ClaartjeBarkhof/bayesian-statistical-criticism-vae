@@ -187,7 +187,7 @@ class Objective(nn.Module):
         elif self.args.objective == "FB-VAE":
             kl_fb = self.free_bits_kl(p_z=p_z, q_z_x=q_z_x, z_post=z_post, free_bits=self.args.free_bits,
                                       per_dimension=self.args.free_bits_per_dimension)
-            loss_dict["kl_fb"] = kl_fb
+            loss_dict["kl_fb"] = kl_fb.item()
             total_loss = distortion + kl_fb
 
         elif self.args.objective == "INFO-VAE":

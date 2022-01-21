@@ -190,6 +190,7 @@ class ImageDataset:
                                                   transform=self.img_transforms)
         # BMNIST
         else:
+            print("**** BMNIST")
             with open(f'{self.data_dir}/BMNIST/binarized_mnist_train.amat') as f:
                 lines = f.readlines()
             x_train = lines_to_np_array(lines).astype('float32')

@@ -1,24 +1,12 @@
-import matplotlib.pyplot as plt
 import matplotlib
 import matplotlib.cm as cm
-import seaborn as sns;
+import matplotlib.pyplot as plt
+import seaborn as sns; sns.set()
 
-sns.set()
-import arviz as az
-
-import numpy as np
-from tabulate import tabulate
 import pandas as pd
-import pickle
-import os
 import torch
 import numpy as np
-from scipy import stats
-from sklearn import preprocessing
-from itertools import cycle
 import torch.distributions as td
-import matplotlib
-import matplotlib.cm as cm
 
 import numpyro
 from numpyro.infer import MCMC, NUTS, Predictive
@@ -26,7 +14,6 @@ import numpyro.distributions as dist
 from jax import random
 from jax.nn import logsumexp
 import jax.numpy as jnp
-
 
 class DPMixture:
     def __init__(self, group_names: list, observations: list, obs_dist="normal",
@@ -37,6 +24,8 @@ class DPMixture:
         self.T = num_comps
 
         self.obs_dist = obs_dist
+
+
         self.truncated_normal_low = truncated_normal_low
 
         # [G]
@@ -44,6 +33,7 @@ class DPMixture:
         self.G = len(group_names)
 
         assert self.G > 1, "only data with more than one group is supported for now"
+
 
         self.group_name_to_id = {n: i for i, n in enumerate(group_names)}
         self.group_id_to_name = {i: n for i, n in enumerate(group_names)}
@@ -54,8 +44,13 @@ class DPMixture:
         self.obs_g = np.concatenate([[g] * len(y) for g, y in enumerate(observations)])
         self.obs_y = np.concatenate(observations)
 
-        # print("obs g shape", self.obs_g.shape)
-        # print("obs y shape", self.obs_y.shape)
+        if self.obs_dist == "log_normal":
+            assert np.all(self.obs_y > 0.0), \
+                "for log normal, all values need to be > 0.0"
+
+        if self.obs_dist == "truncated_normal":
+            assert np.all(self.obs_y > truncated_normal_low), \
+                f"for truncated_normal, all values need to be > truncated_normal_low ={truncated_normal_low}"
 
         self.num_samples = num_samples
         self.num_chains = num_chains
@@ -101,27 +96,33 @@ class DPMixture:
                 lamb = numpyro.sample("lamb", dist.Beta(1.0, 1.0))
                 probs = numpyro.deterministic("probs", self.stick_break_sorting(lamb))
 
-                # probs = numpyro.deterministic("probs", jnp.cumprod(lamb, axis=-1))
-                # probs = numpyro.deterministic("probs", jnp.sort(lamb, axis=-1))
-                # probs = jnp.sort(probs, axis=-1)
+            elif self.obs_dist == "log_normal":
+                max_y = max(self.obs_y)
+                pre_loc = numpyro.sample("pre_loc", dist.Uniform(1, np.log(max_y)))
+                scale = numpyro.sample("scale", dist.Uniform(0, 20))
+                loc = numpyro.deterministic("loc", jnp.cumsum(pre_loc))
 
             # loc & scale for log normal, normal and student T
-            elif "normal" in self.obs_dist or self.obs_dist == "student_t":
-                if self.obs_dist == "log_normal":
-                    mean = 0.0
-                    std = 1.0
-                else:
-                    mean = np.mean(self.obs_y)
-                    std = np.std(self.obs_y)
-                    print("mean:", mean, "std:", std)
+            elif self.obs_dist == "truncated_normal" or self.obs_dist == "normal" or self.obs_dist == "student_t":
+
+                mean = np.mean(self.obs_y)
+                std = np.std(self.obs_y)
+                max_y = np.max(self.obs_y)
+                min_y = np.min(self.obs_y)
+
+                print("mean y:", mean, "std y:", std, "min_y:", min_y, "max y:", max_y)
 
                 # [T]
-                loc = numpyro.sample('loc', dist.Normal(mean, std))
-                idx = jnp.argsort(loc, -1)  # , -1
-                loc = loc[idx]
+                pre_loc = numpyro.sample('pre_loc', dist.Uniform(min_y, max_y))  # dist.Normal(mean, std)
+
+                if min_y > 0:  # if False:
+                    loc = numpyro.deterministic("loc", jnp.cumsum(pre_loc))
+                else:
+                    idx = jnp.argsort(pre_loc, -1)  # , -1
+                    loc = numpyro.deterministic("loc", pre_loc[idx])
 
                 # scale = numpyro.sample('scale', dist.Gamma(1, 10))
-                scale = numpyro.sample('scale', dist.Uniform(0.1, std*2.0)) # was 20.0
+                scale = numpyro.sample('scale', dist.Uniform(0.1, std * 2.0))  # was 20.0
                 # scale = scale[idx]
 
                 # degrees of freedom
@@ -176,8 +177,6 @@ class DPMixture:
             else:
                 raise NotImplementedError
 
-            # print("sampled y", sampled_y.shape)
-
             return sampled_y
 
     def run(self):
@@ -211,18 +210,71 @@ class DPMixture:
         return self.posterior_predictive(rng_key_, y=None)
 
 
-def plot_all_groups_preds_obs(self, prior=False, num_prior_samples=400):
+def surprisal_dp_plot_checks(model, samples, plot_max_groups=5, bins=30, filter_vals_higher=1e6):
+    if (samples > filter_vals_higher).any():
+        print(f"Warning, values higher than {filter_vals_higher}, filtering those out.")
+
+    for k in range(model.G):
+        fig, ax = plt.subplots(ncols=4, figsize=(9, 2))
+
+        # c = next(pal)
+        c = "royalblue"
+
+        yk = model.obs_y[model.obs_g == k]
+        # [num_samples, num_data_points]
+        yk_ = samples[:, model.obs_g == k]
+
+        if (yk_ > filter_vals_higher).any():
+
+            yk_filter = [x for sub_list in yk_.tolist() for x in sub_list if x < filter_vals_higher]
+
+            yk_mean = [np.mean(sub_list) for sub_list in yk_filter]
+            yk_std = [np.std(sub_list) for sub_list in yk_filter]
+            yk_median = [np.median(sub_list) for sub_list in yk_filter]
+
+        else:
+            yk_mean = np.mean(yk_, 1)
+            yk_std = np.std(yk_, 1)
+            yk_median = np.median(yk_, 1)
+
+        _ = ax[0].hist(yk_mean, bins=bins, color=c, label='pred' if k == 0 else None)
+        _ = ax[0].axvline(np.mean(yk), color='black', linestyle='--', label='obs' if k == 0 else None)
+        _ = ax[0].set_xlabel(f'E[Y{k}]')
+
+        _ = ax[1].hist(yk_std, color=c, bins=bins)
+        _ = ax[1].axvline(np.std(yk), color='black', linestyle='--')
+        _ = ax[1].set_xlabel(f'std[Y{k}]')
+
+        _ = ax[2].hist(yk_median, color=c, bins=bins)
+        _ = ax[2].axvline(np.median(yk), color='black', linestyle='--')
+        _ = ax[2].set_xlabel(f'median[Y{k}]')
+
+        pvalues = np.mean(yk_ > yk, 1)
+        _ = ax[3].hist(pvalues, bins=bins, color=c)
+        _ = ax[3].set_xlabel(f'Pr(Y{k} > obs{k})')
+        _ = ax[3].axvline(np.median(pvalues), color='black', linestyle=':', label='median' if k == 0 else None)
+
+        plt.show()
+
+        if k + 1 == plot_max_groups:
+            break
+
+
+def plot_all_groups_preds_obs(self, prior=False, num_prior_samples=400, filter_vals_higher=1e6, sharex=True, sharey=True):
     if prior:
         preds = self.draw_prior_predictions(num_samples=num_prior_samples)["y"]
     else:
         preds = self.draw_posterior_predictions()["y"]
+
+    if (preds > filter_vals_higher).any():
+        print(f"Warning, values higher than {filter_vals_higher}, filtering those out")
 
     N_groups = len(self.group_names)
 
     ncols = 5
     nrows = int(np.ceil(N_groups / 5))
 
-    fig, axs = plt.subplots(ncols=ncols, nrows=nrows, figsize=(3 * ncols, 2 * nrows))
+    fig, axs = plt.subplots(ncols=ncols, nrows=nrows, figsize=(3 * ncols, 2 * nrows), sharex=sharex, sharey=sharey)
 
     for g in range(N_groups):
         row, col = g // ncols, g % ncols
@@ -230,7 +282,11 @@ def plot_all_groups_preds_obs(self, prior=False, num_prior_samples=400):
         preds_g = preds[:, self.obs_g == g]
         obs_g = self.obs_y[self.obs_g == g]
 
-        axs[row, col].hist(np.array(preds_g).flatten(), bins=40, density=True, lw=0, label="preds", alpha=0.7,
+        preds_g = np.array(preds_g).flatten()
+        if (preds_g > filter_vals_higher).any():
+            preds_g = preds_g[preds_g < filter_vals_higher]
+
+        axs[row, col].hist(preds_g, bins=40, density=True, lw=0, label="preds", alpha=0.7,
                            color="blue")
         axs[row, col].hist(np.array(obs_g).flatten(), bins=40, density=True, lw=0, label="obs", alpha=0.7,
                            color="lightblue")
@@ -244,11 +300,14 @@ def plot_all_groups_preds_obs(self, prior=False, num_prior_samples=400):
     plt.show()
 
 
-def plot_model_data_preds_obs(self, prior=False, num_prior_samples=400):
+def plot_model_data_preds_obs(self, prior=False, num_prior_samples=400, filter_vals_higher=1e6):
     if prior:
         preds = self.draw_prior_predictions(num_samples=num_prior_samples)["y"]
     else:
         preds = self.draw_posterior_predictions()["y"]
+
+    if (preds > filter_vals_higher).any():
+        print(f"Warning, values higher than {filter_vals_higher}, filtering those out.")
 
     ncols = 3
     nrows = 1
@@ -270,21 +329,30 @@ def plot_model_data_preds_obs(self, prior=False, num_prior_samples=400):
     preds_data_group = preds[:, self.obs_g == data_group_id]
     obs_data_group = self.obs_y[self.obs_g == data_group_id]
 
-    axs[0].hist(np.array(preds_model_groups).flatten(), bins=40, density=True, lw=0, label="model preds",
+    preds_model_groups = np.array(preds_model_groups).flatten()
+    if (preds_model_groups > filter_vals_higher).any():
+        preds_model_groups = preds_model_groups[preds_model_groups < filter_vals_higher]
+
+    axs[0].hist(preds_model_groups, bins=40, density=True, lw=0, label="model preds",
                 color=c_dict["model preds"], alpha=0.7)
     axs[0].hist(np.array(obs_model_groups).flatten(), bins=40, density=True, lw=0, label="model obs",
                 color=c_dict["model obs"], alpha=0.7)
-    axs[0].hist(np.array(preds_data_group).flatten(), bins=40, density=True, lw=0, label="data preds",
+
+    preds_data_group = np.array(preds_data_group).flatten()
+    if (preds_data_group > filter_vals_higher).any():
+        preds_data_group = preds_data_group[preds_data_group < filter_vals_higher]
+
+    axs[0].hist(preds_data_group, bins=40, density=True, lw=0, label="data preds",
                 color=c_dict["data preds"], alpha=0.7)
     axs[0].hist(np.array(obs_data_group).flatten(), bins=40, density=True, lw=0, label="data obs",
                 color=c_dict["data obs"], alpha=0.7)
 
-    axs[1].hist(np.array(preds_data_group).flatten(), bins=40, density=True, lw=0, label="data preds",
+    axs[1].hist(preds_data_group, bins=40, density=True, lw=0, label="data preds",
                 color=c_dict["data preds"], alpha=0.7)
     axs[1].hist(np.array(obs_data_group).flatten(), bins=40, density=True, lw=0, label="data obs",
                 color=c_dict["data obs"], alpha=0.7)
 
-    axs[2].hist(np.array(preds_model_groups).flatten(), bins=40, density=True, lw=0, label="model preds",
+    axs[2].hist(preds_model_groups, bins=40, density=True, lw=0, label="model preds",
                 color=c_dict["model preds"], alpha=0.7)
     axs[2].hist(np.array(obs_model_groups).flatten(), bins=40, density=True, lw=0, label="model obs",
                 color=c_dict["model obs"], alpha=0.7)
@@ -300,62 +368,6 @@ def plot_model_data_preds_obs(self, prior=False, num_prior_samples=400):
     plt.tight_layout()
     plt.show()
 
-def surprisal_dp_plot_checks(model, samples, plot_max_groups=5, bins=30):
-    for k in range(model.G):
-        fig, ax = plt.subplots(ncols=4, figsize=(9, 2))
-
-        # c = next(pal)
-        c = "royalblue"
-
-        yk = model.obs_y[model.obs_g == k]
-        yk_ = samples[:, model.obs_g == k]
-
-        _ = ax[0].hist(np.mean(yk_, 1), bins=bins, color=c, label='pred' if k == 0 else None)
-        _ = ax[0].axvline(np.mean(yk), color='black', linestyle='--', label='obs' if k == 0 else None)
-        _ = ax[0].set_xlabel(f'E[Y{k}]')
-
-        _ = ax[1].hist(np.std(yk_, 1), color=c, bins=bins)
-        _ = ax[1].axvline(np.std(yk), color='black', linestyle='--')
-        _ = ax[1].set_xlabel(f'std[Y{k}]')
-
-        _ = ax[2].hist(np.median(yk_, 1), color=c, bins=bins)
-        _ = ax[2].axvline(np.median(yk), color='black', linestyle='--')
-        _ = ax[2].set_xlabel(f'median[Y{k}]')
-
-        pvalues = np.mean(yk_ > yk, 1)
-        _ = ax[3].hist(pvalues, bins=bins, color=c)
-        _ = ax[3].set_xlabel(f'Pr(Y{k} > obs{k})')
-        _ = ax[3].axvline(np.median(pvalues), color='black', linestyle=':', label='median' if k == 0 else None)
-
-        plt.show()
-
-        if k + 1 == plot_max_groups:
-            break
-
-def kl_component_dist_and_data_group_distance(self):
-    # [N_s, N_g, N_c]
-    omega = self.posterior_samples["omega"]
-    data_group_id = self.group_names.index("data_group")
-    omega_data_group = omega[:, data_group_id, :]
-
-    omega_tensor = torch.FloatTensor(np.array(omega))
-    omega_data_group_tensor = torch.FloatTensor(np.array(omega_data_group)).unsqueeze(1)
-
-    omega_dists = td.Categorical(probs=omega_tensor)
-    omega_data_group_dists = td.Categorical(probs=omega_data_group_tensor)
-
-    # [N_s, N_g, N_c] -> [N_s, N_g] -> [N_g]
-    kl = td.kl_divergence(omega_data_group_dists, omega_dists)
-    kl_avg = kl.mean(axis=0)  # avg sample dim
-
-    kl_order = np.argsort(kl_avg.numpy().flatten())
-    labels_reorder = np.array(self.group_names)[kl_order]
-
-    kl_comps_data_group = dict()
-    for i in range(len(labels_reorder)):
-        kl_comps_data_group[labels_reorder[i]] = kl_avg[kl_order][i].item()
-
-    return kl_comps_data_group
 
 def estimate_kl_densities_dp_mixture(dp_mixture, num_components=3):
     # beta (1000, 77, 2)
@@ -437,42 +449,6 @@ def estimate_kl_densities_dp_mixture(dp_mixture, num_components=3):
         kl_density_est[model_group] = kl_est
 
     return kl_density_est
-
-def compute_all_divergences_data_model_groups(dp_mixtures, surprisal_values, num_components=3):
-    kl_component_assignments_all_dps = dict()
-
-    for stat, dp_mixture in dp_mixtures.items():
-        print(stat.upper())
-        kl_component_assignments = kl_component_dist_and_data_group_distance(dp_mixture)
-        kl_component_assignments_all_dps["kl_comp " + stat] = kl_component_assignments
-
-    kl_component_assignments_all_dps_df = pd.DataFrame(kl_component_assignments_all_dps)
-    kl_component_assignments_all_dps_df["kl_comp sum"] = kl_component_assignments_all_dps_df.sum(axis=1)
-
-    kl_densities_all_dps = dict()
-    for stat, dp_mixture in dp_mixtures.items():
-        kl_density_est = estimate_kl_densities_dp_mixture(dp_mixture, num_components=num_components)
-        kl_densities_all_dps["kl_dens " + stat] = kl_density_est
-
-    kl_densities_all_dps_df = pd.DataFrame(kl_densities_all_dps)
-    kl_densities_all_dps_df["kl_dens sum"] = kl_densities_all_dps_df.sum(axis=1)
-
-    wass_dists = dict()
-
-    for k, v in surprisal_values.items():
-        if k is not "data_group":
-            wass_dists[k] = dict()
-            for stat_name, stat in v.items():
-                w = stats.wasserstein_distance(stat, surprisal_values["data_group"][stat_name])
-                wass_dists[k]["wasserstein " + stat_name] = w
-
-    wasserstein_df = pd.DataFrame(wass_dists).transpose()
-    wasserstein_df["wasserstein sum"] = wasserstein_df.sum(axis=1)
-
-    all_df = wasserstein_df.join(kl_component_assignments_all_dps_df).join(kl_densities_all_dps_df)
-
-    return all_df
-
 
 def plot_divergences_data_model_groups(all_df, sort_on="kl_comp sum", plot_only=None, figsize=(20, 20)):
     was_cols = [c for c in all_df.columns if "wasserstein" in c]
@@ -578,9 +554,11 @@ def plot_divergences_data_model_groups_against_other_stat(all_df, global_stats_d
     _ = axs[1].axes.yaxis.set_ticklabels([])
     axs[1].set_title(plot_against_name)
 
+
 def plot_surprisal_dists_against_global_stat(global_stats_df, surprisal_values, sort_on, sort_name,
                                              dataset_name, latent_structure,
-                                             xlims, ylims, bins=40, title_size=14, title_y=1.02,
+                                             xlims, ylims, bins=40, cm_name="gnuplot2", title_size=14, title_y=1.02,
+                                             cm_shrink=0.6,
                                              subsample_nrows=None, sort_ascend=True, row_height=1.0):
     assert sort_on in global_stats_df.columns, f"{sort_on} must be in global_stats_df.columns"
 
@@ -619,7 +597,7 @@ def plot_surprisal_dists_against_global_stat(global_stats_df, surprisal_values, 
     # Make colormap based on sort values
     minima, maxima = min(sort_on_values), max(sort_on_values)
     norm = matplotlib.colors.Normalize(vmin=minima, vmax=maxima, clip=True)
-    mapper = cm.ScalarMappable(norm=norm, cmap=cm.viridis)
+    mapper = cm.ScalarMappable(norm=norm, cmap=plt.get_cmap(cm_name))
 
     # Fig
     fig, axs = plt.subplots(ncols=ncols, nrows=nrows, figsize=(ncols * 6, nrows * row_height))  #
@@ -635,7 +613,8 @@ def plot_surprisal_dists_against_global_stat(global_stats_df, surprisal_values, 
 
             color = mapper.to_rgba(sort_on_values[idx])
 
-            axs[row, col].hist(surprisal_values["data_group"][model_cols[col]], color="grey", **hist_kwargs)
+            axs[row, col].hist(surprisal_values["data_group"][model_cols[col]], color="grey", **hist_kwargs,
+                               label="data group")
             axs[row, col].hist(surprisal_values[group_name][model_cols[col]], color=color, **hist_kwargs)
 
             if col == 0:
@@ -662,10 +641,85 @@ def plot_surprisal_dists_against_global_stat(global_stats_df, surprisal_values, 
 
     plt.tight_layout()
     plt.subplots_adjust(wspace=0.1, hspace=0.1)
+
+    axs[0, 2].legend(loc=(1.05, 0.2))
+
+    fig.colorbar(mapper, ax=axs[:, 2], shrink=cm_shrink, location='right', anchor=(1.0, 0.0), pad=(0.01))
+
     if subsample_nrows is not None:
         plt.suptitle(
-            f"{dataset_name} | {latent_structure} | - log p(x) plots, coloured by {sort_name}\nsubsampled {subsample_nrows}/{ngroups} spread over {sort_name} order",
+            f"{dataset_name} | - log p(x) under {latent_structure} | coloured by {sort_name}\nsubsampled {subsample_nrows}/{ngroups} spread over {sort_name} order",
             y=title_y, size=title_size)
     else:
-        plt.suptitle(f"{dataset_name} | {latent_structure} | - log p(x) plots, coloured by {sort_name}", y=title_y,
+        plt.suptitle(f"{dataset_name} | - log p(x) under {latent_structure} | coloured by {sort_name}", y=title_y,
                      size=title_size)
+
+def kl_component_dist_and_data_group_distance(self):
+    # [N_s, N_g, N_c]
+    omega = self.posterior_samples["omega"]
+    data_group_id = self.group_names.index("data_group")
+    omega_data_group = omega[:, data_group_id, :]
+
+    omega_tensor = torch.FloatTensor(np.array(omega))
+    omega_data_group_tensor = torch.FloatTensor(np.array(omega_data_group)).unsqueeze(1)
+
+    omega_dists = td.Categorical(probs=omega_tensor)
+    omega_data_group_dists = td.Categorical(probs=omega_data_group_tensor)
+
+    # [N_s, N_g, N_c] -> [N_s, N_g] -> [N_g]
+    kl = td.kl_divergence(omega_data_group_dists, omega_dists)
+    kl_all = kl.permute(1, 0)  # [N_g, N_s]
+    kl_avg = kl.mean(axis=0)  # avg sample dim
+
+    kl_order = np.argsort(kl_avg.numpy().flatten())
+    labels_reorder = np.array(self.group_names)[kl_order]
+
+    kl_comps_data_group_avg = dict()
+    kl_comps_data_group_dists = dict()
+    for i in range(len(labels_reorder)):
+        group_idx = kl_order[i]
+
+        kl_comps_data_group_avg[labels_reorder[i]] = kl_avg[group_idx].item()
+        kl_comps_data_group_dists[labels_reorder[i]] = kl_all[group_idx].numpy()
+
+    return kl_comps_data_group_avg, kl_comps_data_group_dists
+
+
+def compute_all_divergences_data_model_groups(dp_mixtures, surprisal_values, num_components=3):
+    from scipy import stats
+
+    kl_component_assignments_all_dps = dict()
+
+    kl_comp_dists = {}
+
+    for stat, dp_mixture in dp_mixtures.items():
+        kl_comps_data_group_avg, kl_comps_data_group_dists = kl_component_dist_and_data_group_distance(dp_mixture)
+        kl_component_assignments_all_dps["kl_comp " + stat] = kl_comps_data_group_avg
+        kl_comp_dists[stat] = kl_comps_data_group_dists
+
+    kl_component_assignments_all_dps_df = pd.DataFrame(kl_component_assignments_all_dps)
+    kl_component_assignments_all_dps_df["kl_comp sum"] = kl_component_assignments_all_dps_df.sum(axis=1)
+
+    kl_densities_all_dps = dict()
+    for stat, dp_mixture in dp_mixtures.items():
+        kl_density_est = estimate_kl_densities_dp_mixture(dp_mixture, num_components=num_components)
+        kl_densities_all_dps["kl_dens " + stat] = kl_density_est
+
+    kl_densities_all_dps_df = pd.DataFrame(kl_densities_all_dps)
+    kl_densities_all_dps_df["kl_dens sum"] = kl_densities_all_dps_df.sum(axis=1)
+
+    wass_dists = dict()
+
+    for k, v in surprisal_values.items():
+        if k is not "data_group":
+            wass_dists[k] = dict()
+            for stat_name, stat in v.items():
+                w = stats.wasserstein_distance(stat, surprisal_values["data_group"][stat_name])
+                wass_dists[k]["wasserstein " + stat_name] = w
+
+    wasserstein_df = pd.DataFrame(wass_dists).transpose()
+    wasserstein_df["wasserstein sum"] = wasserstein_df.sum(axis=1)
+
+    all_df = wasserstein_df.join(kl_component_assignments_all_dps_df).join(kl_densities_all_dps_df)
+
+    return all_df, kl_comp_dists

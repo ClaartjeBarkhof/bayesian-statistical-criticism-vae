@@ -295,8 +295,10 @@ def make_run_name(args):
         strong_weak = "STRONG"
     elif "mem" in args.decoder_network_type:
         strong_weak = "WEAK"
+    elif "pixel" in args.decoder_network_type:
+        strong_weak = "PixelCNN++"
     else:
-        strong_weak = "WEAK"
+        strong_weak = "CNN.T"
 
     name = f"{obj} | {strong_weak} | Nz={args.latent_dim}"
 

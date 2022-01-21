@@ -37,7 +37,7 @@ from random import shuffle
 
 class GenLDATopicModelPTB:
     def __init__(self, train_samples_strings, num_topics=10, chunksize=2000, passes=20, iterations=600,
-                 alpha=0.01, beta="auto", eval_every=None):
+                 alpha=0.01, beta="auto", eval_every=None, preprocess_only=False):
 
         # Pre-process the train samples
         self.dictionary, self.train_corpus, _, self.train_docs, self.num_tokens = self.create_lda_corpus(
@@ -45,17 +45,18 @@ class GenLDATopicModelPTB:
         _ = self.dictionary[0]  # This is only to "load" the dictionary.
         self.id2token = self.dictionary.id2token
 
-        self.lda_model = LdaModel(
-            corpus=self.train_corpus,
-            id2word=self.id2token,
-            chunksize=chunksize,
-            alpha=alpha,
-            eta=beta,
-            iterations=iterations,
-            num_topics=num_topics,
-            passes=passes,
-            eval_every=eval_every
-        )
+        if not preprocess_only:
+            self.lda_model = LdaModel(
+                corpus=self.train_corpus,
+                id2word=self.id2token,
+                chunksize=chunksize,
+                alpha=alpha,
+                eta=beta,
+                iterations=iterations,
+                num_topics=num_topics,
+                passes=passes,
+                eval_every=eval_every
+            )
 
     def print_topics(self):
         topics = self.lda_model.show_topics()
@@ -231,3 +232,140 @@ class GenLDATopicModelPTB:
         )
 
         return surprisal_dict
+
+
+# supporting function
+def evaluate_setting(train_corpus, train_docs, train_id2word, valid_corpus, k, a, b):
+    lda_model = LdaModel(corpus=train_corpus,
+                         id2word=train_id2word,
+                         num_topics=k,
+                         random_state=100,
+                         chunksize=2000,
+                         eval_every=5,
+                         passes=20,
+                         alpha=a,
+                         eta=b)
+
+    coherence_model_lda = CoherenceModel(model=lda_model,
+                                         texts=train_docs,
+                                         dictionary=train_id2word,
+                                         coherence='c_v')
+    coherence_score = coherence_model_lda.get_coherence()
+
+    log_ppl = lda_model.log_perplexity(valid_corpus, total_docs=len(train_corpus))
+
+    return coherence_score, log_ppl
+
+
+def resample_corpus(corpus, topic_model, n_samples=50, max_docs=None):
+    """
+    Resample corpus from posterior of a topic model.
+
+    Parameters
+    ----------
+    corpus: List( List ( Tuple (int idx, float count)))
+        a list of documents in the sparse document format:
+    topic_model: LdaModel
+        a Gensim LDA topic model
+    n_samples: int
+        number of times to resample a doc
+    max_docs: int, None
+        max number of documents to resample, if None resample all
+
+    Returns
+    ----------
+    word_dists_orig: np.array [n_docs, n_vocab]
+        original word counts in matrix form
+    word_dists_resample: np.array [n_docs, n_samples, n_vocab]
+        resampled word counts in matrix form
+    """
+    max_docs = len(corpus) if max_docs is None else max_docs
+
+    # N_topics, N_words
+    topic_word_matrix = topic_model.get_topics()
+    n_topics, n_vocab = topic_word_matrix.shape
+
+    word_dists_orig = []
+    word_dists_resample = []
+
+    for d_i, bow in enumerate(corpus):
+        # Infer document topic distribution
+        # list of tuples (topic_id, probability)
+        topic_dist = topic_model.get_document_topics(bow=bow)
+        topic_dist_flat = np.zeros(n_topics)
+        for (t_idx, t_p) in topic_dist:
+            topic_dist_flat[t_idx] = t_p
+        topic_dist_flat /= topic_dist_flat.sum()
+
+        # Make vocab size vector with word counts
+        d_orig = np.zeros(n_vocab)
+        for i, c in bow:
+            d_orig[i] = c
+        n_words = int(np.sum(d_orig))
+
+        d_resample = []
+        for n in range(n_samples):
+            print(f"Doc {d_i:3d}/{max_docs:3d} Sample {n:3d}/{n_samples:3d}", end="\r")
+
+            # Re-sample the doc
+            sample = np.zeros(n_vocab)
+            for _ in range(n_words):
+                # Sample topic
+                topic = np.random.choice(n_topics, 1, p=topic_dist_flat)[0]
+
+                # Get topic-word distribution
+                word_dist = topic_word_matrix[topic]
+                n_vocab = len(word_dist)
+
+                word_id = np.random.choice(n_vocab, 1, p=word_dist)[0]
+                sample[word_id] += 1.
+
+            d_resample.append(sample)
+        # stack samples for doc
+        d_resample = np.stack(d_resample)
+
+        word_dists_orig.append(d_orig)
+        word_dists_resample.append(d_resample)
+
+        if d_i + 1 == max_docs: break
+
+    word_dists_orig = np.stack(word_dists_orig)
+    word_dists_resample = np.stack(word_dists_resample)
+
+    print(word_dists_orig.shape)
+    print(word_dists_resample.shape)
+
+    return word_dists_orig, word_dists_resample
+
+
+def plot_word_dists(word_dists_orig, word_dists_resample):
+    fig, ax = plt.subplots(figsize=(12, 4))
+
+    true_word_dist = word_dists_orig.mean(axis=0)
+    idx_order = np.argsort(true_word_dist)[::-1]
+    true_word_dist_ordered = true_word_dist[idx_order]
+
+    # [n_docs, n_samples, n_vocab] -> [n_samples, n_vocab]
+    word_dists = np.transpose(np.mean(word_dists_resample, axis=0))
+    n_vocab, n_samples = word_dists.shape
+
+    print(n_vocab, n_samples)
+    word_dists = word_dists[idx_order]
+    print(word_dists.shape)
+
+    indices = np.arange(n_vocab)[:, None]
+    indices = np.tile(indices, (1, n_samples))
+
+    ax.scatter(indices.flatten(), word_dists.flatten(), alpha=0.1, s=1,
+               label="sampled freqs. (blue)")
+    ax.scatter(np.arange(n_vocab), true_word_dist_ordered, color='black', alpha=1.0,
+               label="obs freqs. (black)", s=1, marker="_")
+    ax.set_xlabel("Vocab idx")
+    ax.set_ylabel("Frequency")
+
+    leg = ax.legend(loc=(1.02, 0.8))
+
+    for lh in leg.legendHandles:
+        lh.set_alpha(1)
+
+    plt.show()

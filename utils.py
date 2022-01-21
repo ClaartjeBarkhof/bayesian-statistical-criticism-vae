@@ -1,4 +1,5 @@
 import wandb
+import os
 import collections
 from tabulate import tabulate
 from vae_model.vae import VaeModel
@@ -259,7 +260,13 @@ def make_checkpoint(model, args, optimisers, epoch, step, mean_reduced_epoch_sta
 
 
 def load_checkpoint_model_for_eval(checkpoint_path, map_location="cuda:0", return_args=False):
-    checkpoint = torch.load(checkpoint_path, map_location=map_location)
+
+    if os.path.exists(checkpoint_path):
+
+        checkpoint = torch.load(checkpoint_path, map_location=map_location)
+    else:
+        checkpoint = torch.load(checkpoint_path.replace("CNN.T", "WEAK"), map_location=map_location)
+
 
     if "args" in checkpoint:
         args = checkpoint["args"]
