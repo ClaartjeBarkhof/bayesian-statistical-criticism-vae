@@ -654,6 +654,7 @@ def plot_surprisal_dists_against_global_stat(global_stats_df, surprisal_values, 
         plt.suptitle(f"{dataset_name} | - log p(x) under {latent_structure} | coloured by {sort_name}", y=title_y,
                      size=title_size)
 
+
 def kl_component_dist_and_data_group_distance(self):
     # [N_s, N_g, N_c]
     omega = self.posterior_samples["omega"]
@@ -669,21 +670,17 @@ def kl_component_dist_and_data_group_distance(self):
     # [N_s, N_g, N_c] -> [N_s, N_g] -> [N_g]
     kl = td.kl_divergence(omega_data_group_dists, omega_dists)
     kl_all = kl.permute(1, 0)  # [N_g, N_s]
-    kl_avg = kl.mean(axis=0)  # avg sample dim
 
-    kl_order = np.argsort(kl_avg.numpy().flatten())
-    labels_reorder = np.array(self.group_names)[kl_order]
+    kl_avg = kl.mean(axis=0)  # avg sample dim: [N_s, N_g] -> [N_g]
 
     kl_comps_data_group_avg = dict()
     kl_comps_data_group_dists = dict()
-    for i in range(len(labels_reorder)):
-        group_idx = kl_order[i]
 
-        kl_comps_data_group_avg[labels_reorder[i]] = kl_avg[group_idx].item()
-        kl_comps_data_group_dists[labels_reorder[i]] = kl_all[group_idx].numpy()
+    for group_idx, group_name in enumerate(self.group_names):
+        kl_comps_data_group_avg[group_name] = kl_avg[group_idx].item()
+        kl_comps_data_group_dists[group_name] = kl_all[group_idx, :].numpy()
 
     return kl_comps_data_group_avg, kl_comps_data_group_dists
-
 
 def compute_all_divergences_data_model_groups(dp_mixtures, surprisal_values, num_components=3):
     from scipy import stats
@@ -693,6 +690,7 @@ def compute_all_divergences_data_model_groups(dp_mixtures, surprisal_values, num
     kl_comp_dists = {}
 
     for stat, dp_mixture in dp_mixtures.items():
+        # two dicts
         kl_comps_data_group_avg, kl_comps_data_group_dists = kl_component_dist_and_data_group_distance(dp_mixture)
         kl_component_assignments_all_dps["kl_comp " + stat] = kl_comps_data_group_avg
         kl_comp_dists[stat] = kl_comps_data_group_dists

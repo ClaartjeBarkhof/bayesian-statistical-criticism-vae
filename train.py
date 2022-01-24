@@ -212,7 +212,13 @@ class Trainer:
         for batch_idx, batch in enumerate(loader):
             print(f"{batch_idx:3d}/{len(loader)}", end="\r")
 
-            loss_dict = self.validation_step(batch)
+            if type(batch) != dict:
+                # [B, C, W, H]
+                x_in, _ = batch  # get rid of y
+            else:
+                x_in = batch  # keep the full dict w. input_ids, attention_mask
+
+            loss_dict = self.validation_step(x_in)
 
             for k, v in loss_dict.items():
                 if k not in results:

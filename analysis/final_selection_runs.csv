@@ -33,7 +33,7 @@ INFO-VAE l_Rate 10 l_MMD 1 dec: CNN.T,INFO-VAE,10,bmnist,image,0,0,0,1,basic_dec
 INFO-VAE l_Rate 10 l_MMD 1 dec: PixelCNN++,INFO-VAE,10,bmnist,image,0,0,0,1,cond_pixel_cnn_pp,"(20-jan bmnist) INFO-VAE[l_1_rate=10.0, l_2_mmd=1.0] | PixelCNN++ | Nz=10"
 INFO-VAE l_Rate 10 l_MMD 10 dec: CNN.T,INFO-VAE,10,bmnist,image,0,0,0,10,basic_deconv_decoder,"(20-jan bmnist) INFO-VAE[l_1_rate=10.0, l_2_mmd=10.0] | CNN.T | Nz=10"
 INFO-VAE l_Rate 10 l_MMD 10 dec: PixelCNN++,INFO-VAE,10,bmnist,image,0,0,0,10,cond_pixel_cnn_pp,"(20-jan bmnist) INFO-VAE[l_1_rate=10.0, l_2_mmd=10.0] | PixelCNN++ | Nz=10"
-INFO-VAE l_Rate 10 l_MMD 100 dec: CNN.T,INFO-VAE,10,bmnist,image,0,0,0,100,basic_deconv_decoder,"(20-jan bmnist) INFO-VAE[l_1_rate=10.0, l_2_mmd=100.0] | CNN.T | Nz=10"
+INFO-VAE l_Rate 10 l_MMD 100 dec: CNN.T,INFO-VAE,10,bmnist,image,0,0,0,100,basic_deconv_decoder,"(23-jan bmnist) INFO-VAE[l_1_rate=10.0, l_2_mmd=100.0] | CNN.T | Nz=10"
 INFO-VAE l_Rate 10 l_MMD 100 dec: PixelCNN++,INFO-VAE,10,bmnist,image,0,0,0,100,cond_pixel_cnn_pp,"(20-jan bmnist) INFO-VAE[l_1_rate=10.0, l_2_mmd=100.0] | PixelCNN++ | Nz=10"
 BETA-VAE beta 0.25 dec: CNN.T,BETA-VAE,0,bmnist,image,0.25,0,0,0,basic_deconv_decoder,(beta-vae-exp 6 oct) B-VAE[b=0.25] | q(z|x) independent_gaussian | p(x|z) basic_deconv_decoder | p(z) isotropic_gaussian | D = 10 | 2021-10-06-11:39:10
 BETA-VAE beta 0.25 dec: PixelCNN++,BETA-VAE,0,bmnist,image,0.25,0,0,0,cond_pixel_cnn_pp,(beta-vae-exp 6 oct) B-VAE[b=0.25] | q(z|x) independent_gaussian | p(x|z) cond_pixel_cnn_pp | p(z) isotropic_gaussian | D = 10 | 2021-10-06-08:38:42
