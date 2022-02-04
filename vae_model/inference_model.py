@@ -132,7 +132,12 @@ class IndependentGaussianBlock(nn.Module):
         assert mean.shape == (q_z_x_params.shape[0], self.D), "mean is supposed to be of shape [B, D]"
         assert scale.shape == (q_z_x_params.shape[0], self.D), "scale is supposed to be of shape [B, D]"
 
-        q_z_x = td.Independent(td.Normal(loc=mean, scale=scale), 1)
+        try:
+            q_z_x = td.Independent(td.Normal(loc=mean, scale=scale), 1)
+        except Exception as e:
+            print("mean:", mean)
+            print("scale", scale)
+            print("excpetion", e)
 
         return q_z_x
 
