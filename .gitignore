@@ -151,6 +151,7 @@ check_inference_model.ipynb
 /00_analysis_old/
 /analysis_run_postprocessing/
 generate_jobs.py
+/diagrams
 
 !analysis/data_space/output_files/MNIST_surprisal_values.pt
 !analysis/data_space/output_files/sequence_len_surprisal_values.pt
