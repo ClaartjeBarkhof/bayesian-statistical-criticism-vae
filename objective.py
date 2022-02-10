@@ -172,6 +172,7 @@ class Objective(nn.Module):
 
         elif self.args.objective == "BETA-VAE":
             beta_kl = self.args.beta_beta * kl_prior_post
+            #print("self.args.beta_beta", self.args.beta_beta, "kl_prior_post", kl_prior_post.item(), "beta_kl", beta_kl.item())
             total_loss = distortion + beta_kl
             loss_dict["beta_kl"] = beta_kl
 

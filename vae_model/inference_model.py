@@ -119,14 +119,23 @@ class IndependentGaussianBlock(nn.Module):
         super(IndependentGaussianBlock, self).__init__()
         self.B = args.batch_size
         self.D = args.latent_dim
+        self.AE = True if args.objective == "AE" or (args.objective == "BETA-VAE" and args.beta_beta == 0.0) else False
 
         pre_bottle_neck_size = 256 if args.latent_dim < 256 else args.latent_dim
         self.mean_layer = nn.Linear(pre_bottle_neck_size, self.D)
         self.scale_layer = nn.Sequential(nn.Linear(pre_bottle_neck_size, self.D), nn.Softplus())
 
     def forward(self, q_z_x_params):
+        #print("q_z_x_params.min(), q_z_x_params.max(), q_z_x_params.mean(), q_z_x_params.shape")
+        #print(q_z_x_params.min().item(), q_z_x_params.max().item(), q_z_x_params.mean().item(), q_z_x_params.shape)
+
         mean = self.mean_layer(q_z_x_params)
         scale = self.scale_layer(q_z_x_params)
+
+        # to avoid under / overflow
+        if self.AE:
+            mean = torch.clamp(mean, min=-1e12, max=1e12)
+            scale = torch.clamp(scale, min=1e-12, max=1e12)
 
         # [B, D] (D independent Gaussians)
         assert mean.shape == (q_z_x_params.shape[0], self.D), "mean is supposed to be of shape [B, D]"
@@ -134,12 +143,14 @@ class IndependentGaussianBlock(nn.Module):
 
         try:
             q_z_x = td.Independent(td.Normal(loc=mean, scale=scale), 1)
+            return q_z_x
         except Exception as e:
+            # autoencoder under / overflow
             print("mean:", mean)
             print("scale", scale)
             print("excpetion", e)
 
-        return q_z_x
+
 
 
 class StandardNormal(nn.Module):

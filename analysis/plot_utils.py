@@ -1,24 +1,8 @@
 import matplotlib.colors as mcolors
 import pickle
+from cycler import cycler
 
-c_dict = {
-    "black": "#131313",
-    'dark_blue': '#10277C',
-    'steal_blue': '#356FB2',
-    'bright_blue': '#55B9F9',
-    'pink': '#F3B5E0',
-    'orange': '#EE6A2C',
-    'light_grey': "#E9E9E9"
-}
 
-cmap_c_dict = {
-    "black": "#131313",
-    'dark_blue': '#10277C',
-    'steal_blue': '#356FB2',
-    'bright_blue': '#55B9F9',
-    'pink': '#F3B5E0',
-    'orange': '#EE6A2C',
-}
 
 def hex_to_RGB(hex):
     ''' "#FFFFFF" -> [255,255,255] '''
@@ -88,12 +72,25 @@ def make_cmap(list_of_colours, n_colors=1000):
     cmap = mcolors.ListedColormap([[interpolated_colors['r'][i]/256, interpolated_colors['g'][i]/256, interpolated_colors['b'][i]/256] for i in range(n_colors-5)])
     return cmap
 
-def main():
-    bit_cmap_dark = make_cmap([color_dict['dark_blue'], color_dict['blue'], color_dict['pink'],  color_dict['orange'], color_dict['red']])
-    bit_cmap_light = make_cmap([color_dict['green'], color_dict['blue'], color_dict['sand'], color_dict['pink'],color_dict['orange']])
+c_dict = {
+    "black": "#131313",
+    'dark_blue': '#10277C',
+    'steal_blue': '#356FB2',
+    'bright_blue': '#55B9F9',
+    'pink': '#F3B5E0',
+    'orange': '#EE6A2C',
+    'light_grey': "#E9E9E9"
+}
 
-    pickle.dump(bit_cmap_dark, open('bit_cmap_dark.pkl', 'wb'))
-    pickle.dump(bit_cmap_light, open('bit_cmap_light.pkl', 'wb'))
+c_cycler = cycler(color=list(c_dict.values()))
 
-if __name__ == '__main__':
-    main()
+cmap_c_dict = {
+    "black": "#131313",
+    'dark_blue': '#10277C',
+    'steal_blue': '#356FB2',
+    'bright_blue': '#55B9F9',
+    'pink': '#F3B5E0',
+    'orange': '#EE6A2C',
+}
+
+cmap = make_cmap(list(cmap_c_dict.values()), n_colors=1000)
