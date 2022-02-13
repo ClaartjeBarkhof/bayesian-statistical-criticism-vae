@@ -558,7 +558,7 @@ def plot_divergences_data_model_groups_against_other_stat(all_df, global_stats_d
 def plot_surprisal_dists_against_global_stat(global_stats_df, surprisal_values, sort_on, sort_name,
                                              dataset_name, latent_structure,
                                              xlims, ylims, bins=40, cm_name="gnuplot2", title_size=14, title_y=1.02,
-                                             cm_shrink=0.6,
+                                             cm_shrink=0.6, cmap=None,
                                              subsample_nrows=None, sort_ascend=True, row_height=1.0):
     assert sort_on in global_stats_df.columns, f"{sort_on} must be in global_stats_df.columns"
 
@@ -597,7 +597,10 @@ def plot_surprisal_dists_against_global_stat(global_stats_df, surprisal_values, 
     # Make colormap based on sort values
     minima, maxima = min(sort_on_values), max(sort_on_values)
     norm = matplotlib.colors.Normalize(vmin=minima, vmax=maxima, clip=True)
-    mapper = cm.ScalarMappable(norm=norm, cmap=plt.get_cmap(cm_name))
+    if cmap is None:
+        mapper = cm.ScalarMappable(norm=norm, cmap=plt.get_cmap(cm_name))
+    else:
+        mapper = cm.ScalarMappable(norm=norm, cmap=cmap)
 
     # Fig
     fig, axs = plt.subplots(ncols=ncols, nrows=nrows, figsize=(ncols * 6, nrows * row_height))  #

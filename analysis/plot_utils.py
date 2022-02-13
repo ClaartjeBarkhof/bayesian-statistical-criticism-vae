@@ -79,7 +79,10 @@ c_dict = {
     'bright_blue': '#55B9F9',
     'pink': '#F3B5E0',
     'orange': '#EE6A2C',
-    'light_grey': "#E9E9E9"
+    'light_grey': "#E9E9E9",
+    'purple': "#c0b6e2",
+    'red': "#c53827",
+    'light_blue': '#94c6e9'
 }
 
 c_cycler = cycler(color=list(c_dict.values()))
