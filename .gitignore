@@ -153,6 +153,10 @@ check_inference_model.ipynb
 generate_jobs.py
 /diagrams
 
+analysis/data_space/output_files/MNIST_surprisal_dp_mixtures.pt
+analysis/data_space/output_files/sequence_length_surprisal_dp_mixtures.pt
+analysis/data_space/output_files/topic_model_surprisal_dp_mixtures.pt
+
 !analysis/data_space/output_files/MNIST_surprisal_values.pt
 !analysis/data_space/output_files/sequence_len_surprisal_values.pt
 !analysis/data_space/output_files/topic_model_surprisal_values.pt
