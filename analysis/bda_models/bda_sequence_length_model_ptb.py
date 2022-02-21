@@ -261,8 +261,10 @@ class GenSeqLenModelPTB:
         # [N]
         return log_prob.numpy()
 
-def plot_predictions(model, samples, bins=[20, 100], density=[True, True], sharex=True, sharey=True):
-    fig, ax = plt.subplots(model.G, 2, sharex=sharex, sharey=sharey, figsize=(10, 5))
+
+def plot_predictions(model, samples, bins=[20, 100], density=[True, True], sharex=True, sharey=True,
+                     c_preds="#55B9F9", c_true="#EE6A2C", save_as=None):
+    fig, ax = plt.subplots(model.G, 2, sharex=sharex, sharey=sharey, figsize=(8, model.G * 2.5))
     if model.G == 1:
         ax = ax.reshape(1, -1)
     pal = cycle(sns.color_palette())
@@ -270,24 +272,29 @@ def plot_predictions(model, samples, bins=[20, 100], density=[True, True], share
         yk = model.y[model.x == k]
         yk_ = samples[:, model.x == k]
         c = next(pal)
-        _ = ax[k, 0].hist(yk, bins=bins[0], color=c, density=density[0])
-        _ = ax[k, 0].set_xlabel(f'obs: {model.group_names[k]}')
-        _ = ax[k, 1].hist(yk_.flatten(), bins=bins[1], color=c, density=density[1])
-        _ = ax[k, 1].set_xlabel(f'predictive: {model.group_names[k]}')
+        _ = ax[k, 0].hist(yk, bins=bins[0], color=c_true, density=density[0])
+        #         _ = ax[k, 0].set_xlabel(f'obs: {model.group_names[k]}')
+        _ = ax[k, 0].set_title(f'Observations')
+        _ = ax[k, 1].hist(yk_.flatten(), bins=bins[1], color=c_preds, density=density[1])
+        #         _ = ax[k, 1].set_xlabel(f'predictive: {model.group_names[k]}')
+        _ = ax[k, 1].set_title(f'Predictions')
 
     fig.tight_layout(h_pad=2, w_pad=2)
+    if save_as is not None:
+        fig.savefig(save_as, dpi=300, bbox="tight_inches")
     fig.show()
 
-def plot_checks(model, samples, bins=30):
-    fig, ax = plt.subplots(model.G, 4, figsize=(15, 5))
+
+def plot_checks(model, samples, bins=30, c_pval="#356FB2", c="#EE6A2C", save_as=None):
+    fig, ax = plt.subplots(model.G, 4, figsize=(12, model.G * 2.5))
 
     if model.G == 1:
         ax = ax.reshape(1, -1)
 
-    pal = cycle(sns.color_palette())
+    # pal = cycle(sns.color_palette())
 
     for k in range(model.G):
-        c = next(pal)
+        # c = next(pal)
         yk = model.y[model.x == k]
         yk_ = samples[:, model.x == k]
 
@@ -306,10 +313,12 @@ def plot_checks(model, samples, bins=30):
         pvalues = np.mean(yk_ > yk, 1)
         _ = ax[k, 3].hist(pvalues, bins=bins)
         _ = ax[k, 3].set_xlabel(f'Pr(Y{k} > obs{k})')
-        _ = ax[k, 3].axvline(np.median(pvalues), color='black', linestyle=':', label='median' if k == 0 else None)
+        _ = ax[k, 3].axvline(np.median(pvalues), color=c_pval, linestyle=':', label='median' if k == 0 else None)
 
     _ = fig.legend(loc='upper center', ncol=3)
     fig.tight_layout(h_pad=2, w_pad=2)
+    if save_as is not None:
+        fig.savefig(save_as, dpi=300, bbox="tight_inches")
     fig.show()
 
 

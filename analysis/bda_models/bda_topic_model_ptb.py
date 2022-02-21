@@ -338,8 +338,8 @@ def resample_corpus(corpus, topic_model, n_samples=50, max_docs=None):
     return word_dists_orig, word_dists_resample
 
 
-def plot_word_dists(word_dists_orig, word_dists_resample):
-    fig, ax = plt.subplots(figsize=(12, 4))
+def plot_word_dists(word_dists_orig, word_dists_resample, save_as=None):
+    fig, ax = plt.subplots(figsize=(10, 4))
 
     true_word_dist = word_dists_orig.mean(axis=0)
     idx_order = np.argsort(true_word_dist)[::-1]
@@ -357,7 +357,7 @@ def plot_word_dists(word_dists_orig, word_dists_resample):
     indices = np.tile(indices, (1, n_samples))
 
     ax.scatter(indices.flatten(), word_dists.flatten(), alpha=0.1, s=1,
-               label="sampled freqs. (blue)")
+               label="sampled freqs. (blue)", color="#55B9F9")
     ax.scatter(np.arange(n_vocab), true_word_dist_ordered, color='black', alpha=1.0,
                label="obs freqs. (black)", s=1, marker="_")
     ax.set_xlabel("Vocab idx")
@@ -367,5 +367,8 @@ def plot_word_dists(word_dists_orig, word_dists_resample):
 
     for lh in leg.legendHandles:
         lh.set_alpha(1)
+
+    if save_as is not None:
+        plt.savefig(save_as, dpi=300, bbox="tight_inches")
 
     plt.show()
