@@ -157,6 +157,7 @@ generate_jobs.py
 !analysis/data_space/output_files/sequence_len_surprisal_values.pt
 !analysis/data_space/output_files/topic_model_surprisal_values.pt
 !analysis/data_space/output_files/topic_model_tuning_results.pt
+!analysis/data_space/ptb_length_analysis_data.pt
 
 !analysis/global_stats.csv
 !analysis/final_selection_runs.csv
