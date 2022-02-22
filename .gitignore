@@ -152,6 +152,12 @@ check_inference_model.ipynb
 generate_jobs.py
 /diagrams
 
+!analysis/data_space/output_files/MNIST_dp_mixtures_kl_comp_dists.pt
+!analysis/data_space/output_files/MNIST_surprisal_values.pt
+!analysis/data_space/output_files/sequence_len_surprisal_values.pt
+!analysis/data_space/output_files/topic_model_surprisal_values.pt
+!analysis/data_space/output_files/topic_model_tuning_results.pt
+
 !analysis/global_stats.csv
 !analysis/final_selection_runs.csv
 /analysis_run_postprocessing/run_postprocess_files/
