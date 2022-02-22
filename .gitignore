@@ -159,6 +159,11 @@ generate_jobs.py
 !analysis/data_space/output_files/topic_model_tuning_results.pt
 !analysis/data_space/ptb_length_analysis_data.pt
 
+!analysis/latent_space/language_latent_kl.pt
+!analysis/latent_space/image_latent_kl.pt
+!analysis/latent_space/image_encoding_stats.csv
+!analysis/latent_space/language_encoding_stats.csv
+
 !analysis/global_stats.csv
 !analysis/final_selection_runs.csv
 /analysis_run_postprocessing/run_postprocess_files/
