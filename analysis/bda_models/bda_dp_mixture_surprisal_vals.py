@@ -229,57 +229,127 @@ class DPMixture:
         return self.posterior_predictive(rng_key_, y=None)
 
 
-def surprisal_dp_plot_checks(model, samples, plot_max_groups=5, bins=30, filter_vals_higher=1e6, sharex=False, sharey=False):
+def surprisal_dp_plot_checks(model, samples, plot_max_groups=5, bins=30, filter_vals_higher=1e6,
+                             sharex=False, sharey=False, plot_separately=False, save_as=None):
     if (samples > filter_vals_higher).any():
         print(f"Warning, values higher than {filter_vals_higher}, filtering those out.")
+    # c = next(pal)
+    c = "#356FB2"
+    # Faster output
+    if plot_separately:
+        for k in range(model.G):
+            fig, ax = plt.subplots(ncols=4, sharex=sharex, sharey=sharey, figsize=(9, 2))
 
-    for k in range(model.G):
-        fig, ax = plt.subplots(ncols=4, sharex=sharex, sharey=sharey, figsize=(9, 2))
+            yk = model.obs_y[model.obs_g == k]
+            # [num_samples, num_data_points]
+            yk_ = samples[:, model.obs_g == k]
 
-        # c = next(pal)
-        c = "royalblue"
+            if (yk_ > filter_vals_higher).any():
 
-        yk = model.obs_y[model.obs_g == k]
-        # [num_samples, num_data_points]
-        yk_ = samples[:, model.obs_g == k]
+                yk_filter = [x for sub_list in yk_.tolist() for x in sub_list if x < filter_vals_higher]
 
-        if (yk_ > filter_vals_higher).any():
+                yk_mean = [np.mean(sub_list) for sub_list in yk_filter]
+                yk_std = [np.std(sub_list) for sub_list in yk_filter]
+                yk_median = [np.median(sub_list) for sub_list in yk_filter]
 
-            yk_filter = [x for sub_list in yk_.tolist() for x in sub_list if x < filter_vals_higher]
+            else:
+                yk_mean = np.mean(yk_, 1)
+                yk_std = np.std(yk_, 1)
+                yk_median = np.median(yk_, 1)
 
-            yk_mean = [np.mean(sub_list) for sub_list in yk_filter]
-            yk_std = [np.std(sub_list) for sub_list in yk_filter]
-            yk_median = [np.median(sub_list) for sub_list in yk_filter]
+            _ = ax[0].hist(yk_mean, bins=bins, color=c, label='pred' if k == 0 else None)
+            _ = ax[0].axvline(np.mean(yk), color='black', linestyle='--', label='obs' if k == 0 else None)
+            _ = ax[0].set_xlabel(f'E[Y{k}]')
 
-        else:
-            yk_mean = np.mean(yk_, 1)
-            yk_std = np.std(yk_, 1)
-            yk_median = np.median(yk_, 1)
+            _ = ax[1].hist(yk_std, color=c, bins=bins)
+            _ = ax[1].axvline(np.std(yk), color='black', linestyle='--')
+            _ = ax[1].set_xlabel(f'std[Y{k}]')
 
-        _ = ax[0].hist(yk_mean, bins=bins, color=c, label='pred' if k == 0 else None)
-        _ = ax[0].axvline(np.mean(yk), color='black', linestyle='--', label='obs' if k == 0 else None)
-        _ = ax[0].set_xlabel(f'E[Y{k}]')
+            _ = ax[2].hist(yk_median, color=c, bins=bins)
+            _ = ax[2].axvline(np.median(yk), color='black', linestyle='--')
+            _ = ax[2].set_xlabel(f'median[Y{k}]')
 
-        _ = ax[1].hist(yk_std, color=c, bins=bins)
-        _ = ax[1].axvline(np.std(yk), color='black', linestyle='--')
-        _ = ax[1].set_xlabel(f'std[Y{k}]')
+            pvalues = np.mean(yk_ > yk, 1)
+            _ = ax[3].hist(pvalues, bins=bins, color=c)
+            _ = ax[3].set_xlabel(f'Pr(Y{k} > obs{k})')
+            _ = ax[3].axvline(np.median(pvalues), color='black', linestyle=':', label='median' if k == 0 else None)
 
-        _ = ax[2].hist(yk_median, color=c, bins=bins)
-        _ = ax[2].axvline(np.median(yk), color='black', linestyle='--')
-        _ = ax[2].set_xlabel(f'median[Y{k}]')
+            plt.show()
 
-        pvalues = np.mean(yk_ > yk, 1)
-        _ = ax[3].hist(pvalues, bins=bins, color=c)
-        _ = ax[3].set_xlabel(f'Pr(Y{k} > obs{k})')
-        _ = ax[3].axvline(np.median(pvalues), color='black', linestyle=':', label='median' if k == 0 else None)
+            if k + 1 == plot_max_groups:
+                break
+    else:
+        nrows = model.G if plot_max_groups >= model.G else plot_max_groups
+        nrows_div_2 = int(np.ceil(nrows / 2))
 
+        print("nrows nrows_div_2", nrows, nrows_div_2)
+
+        fig, ax = plt.subplots(ncols=4 * 2, nrows=nrows_div_2, sharex=sharex, sharey=sharey,
+                               figsize=(18, 1.2 * nrows_div_2))
+
+        for k in range(model.G):
+
+            row = k % nrows_div_2
+            col_shift = 4 if k > nrows_div_2 - 1 else 0
+
+            # print(f"group {k}, row {row}, shift {col_shift}")
+
+            yk = model.obs_y[model.obs_g == k]
+            # [num_samples, num_data_points]
+            yk_ = samples[:, model.obs_g == k]
+
+            if (yk_ > filter_vals_higher).any():
+
+                yk_filter = [x for sub_list in yk_.tolist() for x in sub_list if x < filter_vals_higher]
+
+                yk_mean = [np.mean(sub_list) for sub_list in yk_filter]
+                yk_std = [np.std(sub_list) for sub_list in yk_filter]
+                yk_median = [np.median(sub_list) for sub_list in yk_filter]
+
+            else:
+                yk_mean = np.mean(yk_, 1)
+                yk_std = np.std(yk_, 1)
+                yk_median = np.median(yk_, 1)
+
+            _ = ax[row, 0 + col_shift].hist(yk_mean, bins=bins, density=True, color=c, label='pred' if k == 0 else None)
+            _ = ax[row, 0 + col_shift].axvline(np.mean(yk), color='black', linestyle='--',
+                                               label='obs' if k == 0 else None)
+            _ = ax[row, 0 + col_shift].set_xlabel(f'E[Y{k}]', size=8)
+
+            _ = ax[row, 1 + col_shift].hist(yk_std, color=c, bins=bins, density=True)
+            _ = ax[row, 1 + col_shift].axvline(np.std(yk), color='black', linestyle='--')
+            _ = ax[row, 1 + col_shift].set_xlabel(f'std[Y{k}]', size=8)
+
+            title = f"Group {k} = {model.group_names[k]}"
+            if "dec: Strong roBERTa" in title:
+                title = title.replace("dec: Strong roBERTa", "")
+            elif "dec: " in title:
+                title = title.replace("dec: ", "")
+
+            _ = ax[row, 0 + col_shift].set_title(title, size=8, y=1.04)
+
+            _ = ax[row, 2 + col_shift].hist(yk_median, color=c, bins=bins, density=True)
+            _ = ax[row, 2 + col_shift].axvline(np.median(yk), color='black', linestyle='--')
+            _ = ax[row, 2 + col_shift].set_xlabel(f'median[Y{k}]', size=8)
+
+            pvalues = np.mean(yk_ > yk, 1)
+            _ = ax[row, 3 + col_shift].hist(pvalues, bins=bins, color=c, density=True)
+            _ = ax[row, 3 + col_shift].set_xlabel(f'Pr(Y{k} > obs{k})', size=8)
+            _ = ax[row, 3 + col_shift].axvline(np.median(pvalues), color='black', linestyle=':',
+                                               label='median' if k == 0 else None)
+
+            if k + 1 == plot_max_groups:
+                break
+
+        # plt.tight_layout()
+        plt.subplots_adjust(hspace=2.3, wspace=0.5)
+        if save_as is not None:
+            plt.savefig(save_as, dpi=300, bbox="tight_inches")
         plt.show()
 
-        if k + 1 == plot_max_groups:
-            break
 
-
-def plot_all_groups_preds_obs(self, prior=False, num_prior_samples=400, filter_vals_higher=1e6, sharex=True, sharey=True):
+def plot_all_groups_preds_obs(self, prior=False, num_prior_samples=400,
+                              filter_vals_higher=1e6, sharex=True, sharey=True, save_as=None):
     if prior:
         preds = self.draw_prior_predictions(num_samples=num_prior_samples)["y"]
     else:
@@ -288,16 +358,16 @@ def plot_all_groups_preds_obs(self, prior=False, num_prior_samples=400, filter_v
     if (preds > filter_vals_higher).any():
         print(f"Warning, values higher than {filter_vals_higher}, filtering those out")
     if (preds == -np.inf).any():
-        print(f"Warning, -inf values in predictions, filtering those out.")        
+        print(f"Warning, -inf values in predictions, filtering those out.")
     if (preds == np.inf).any():
-        print(f"Warning, +inf values in predictions, filtering those out.")        
+        print(f"Warning, +inf values in predictions, filtering those out.")
 
     N_groups = len(self.group_names)
 
     ncols = 5
     nrows = int(np.ceil(N_groups / 5))
 
-    fig, axs = plt.subplots(ncols=ncols, nrows=nrows, figsize=(3 * ncols, 2 * nrows), sharex=sharex, sharey=sharey)
+    fig, axs = plt.subplots(ncols=ncols, nrows=nrows, figsize=(3 * ncols, 1 * nrows), sharex=sharex, sharey=sharey)
 
     for g in range(N_groups):
         row, col = g // ncols, g % ncols
@@ -313,17 +383,39 @@ def plot_all_groups_preds_obs(self, prior=False, num_prior_samples=400, filter_v
         if (preds_g == np.inf).any():
             preds_g = preds_g[preds_g != np.inf]
 
-        axs[row, col].hist(preds_g, bins=40, density=True, lw=0, label="preds", alpha=0.7,
-                           color="blue")
-        axs[row, col].hist(np.array(obs_g).flatten(), bins=40, density=True, lw=0, label="obs", alpha=0.7,
-                           color="lightblue")
+        axs[row, col].hist(preds_g, bins=40, density=True, lw=0.0, label="preds", alpha=0.7,
+                           color="#10277C")  # steal_blue
+        axs[row, col].hist(np.array(obs_g).flatten(), bins=40, density=True, lw=0.0, label="obs", alpha=0.8,
+                           color="#55B9F9")  # bright blue
 
-        axs[row, col].set_title(self.group_names[g], size=8)
+        title = f"{self.group_names[g]}"
+        if "dec: Strong roBERTa" in title:
+            title = title.replace("dec: Strong roBERTa", "")
+        elif "dec: " in title:
+            title = title.replace("dec: ", "")
+
+        axs[row, col].set_title(title, size=7)
+
+        axs[row, col].tick_params(axis='x', labelsize=7)
+        axs[row, col].tick_params(axis='y', labelsize=7)
 
         if (col == ncols - 1) and (row == 0):
             axs[row, col].legend(loc=(1.05, 0.8))
 
+    nplots = ncols * nrows
+    ndel = nplots - N_groups
+
+    for r in range(nrows):
+        for c in range(ncols):
+            i = (r * ncols) + c
+            if i + 1 > N_groups:
+                plt.delaxes(ax=axs[r, c])
+
     plt.tight_layout()
+
+    if save_as is not None:
+        plt.savefig(save_as, dpi=300, bbox="tight_inches")
+
     plt.show()
 
 

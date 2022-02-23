@@ -165,7 +165,7 @@ class gated_resnet(nn.Module):
             # [B, dim_i, dim_i, 2]
             h_proj = h_proj.reshape(B, self.dim_i, self.dim_i, 2)
 
-            # 2 * [B, dim_i, dim_i]
+            # 2 * [B, dim_i, dim_i, 1]
             h_proj_a, h_proj_b = torch.chunk(h_proj, 2, dim=-1)
             h_proj_a, h_proj_b = h_proj_a.permute(0, 3, 1, 2), h_proj_b.permute(0, 3, 1, 2)
 
