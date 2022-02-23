@@ -18,11 +18,12 @@ import jax.numpy as jnp
 class DPMixture:
     def __init__(self, group_names: list, observations: list, obs_dist="normal",
                  DP_alpha=1., num_comps=5, truncated_normal_low=0.0,
+                 prior_params=dict(),
                  num_samples=1000, num_chains=1, num_warmup=100):
 
         self.DP_alpha = DP_alpha
         self.T = num_comps
-
+        self.prior_params = prior_params
         self.obs_dist = obs_dist
 
 
@@ -93,13 +94,19 @@ class DPMixture:
         # Components
         with numpyro.plate("components", T):
             if self.obs_dist == "binomial":
-                lamb = numpyro.sample("lamb", dist.Beta(1.0, 1.0))
+                lamb = numpyro.sample("lamb", dist.Beta(self.prior_params.get('beta_a', 1.0), self.prior_params.get('beta_b', 1.0)))
                 probs = numpyro.deterministic("probs", self.stick_break_sorting(lamb))
 
+            elif self.obs_dist == "gamma":
+                pre_mean = numpyro.sample("pre_mean", dist.Exponential(self.prior_params.get('gamma_pre_mean', 1.0)))
+                rate = 1e-3 + numpyro.sample("rate", dist.Exponential(self.prior_params.get('gamma_rate', 1.0)))
+                shape = numpyro.deterministic("shape", jnp.cumsum(pre_mean, -1) * rate)
             elif self.obs_dist == "log_normal":
                 max_y = max(self.obs_y)
-                pre_loc = numpyro.sample("pre_loc", dist.Uniform(1, np.log(max_y)))
-                scale = numpyro.sample("scale", dist.Uniform(0, 20))
+                log_normal_pre_loc_low = self.prior_params.get('log_normal_pre_loc_low', 1.0)
+                log_normal_pre_loc_high = self.prior_params.get('log_normal_pre_loc_high', np.log(max_y))
+                pre_loc = numpyro.sample("pre_loc", dist.Uniform(log_normal_pre_loc_low, log_normal_pre_loc_high))
+                scale = numpyro.sample("scale", dist.Uniform(self.prior_params.get('log_normal_scale_low', 0.0), self.prior_params.get('log_normal_scale_high', 20.0)))
                 loc = numpyro.deterministic("loc", jnp.cumsum(pre_loc))
 
             # loc & scale for log normal, normal and student T
@@ -110,16 +117,24 @@ class DPMixture:
                 max_y = np.max(self.obs_y)
                 min_y = np.min(self.obs_y)
 
+                
                 print("mean y:", mean, "std y:", std, "min_y:", min_y, "max y:", max_y)
 
                 # [T]
-                pre_loc = numpyro.sample('pre_loc', dist.Uniform(min_y, max_y))  # dist.Normal(mean, std)
+                pre_loc = numpyro.sample(
+                    'pre_loc', 
+                    dist.Uniform(
+                        self.prior_params.get("pre_loc_low", min_y), 
+                        self.prior_params.get("pre_loc_high", max_y), 
+                    )
+                )  # dist.Normal(mean, std)
 
                 if min_y > 0:  # if False:
-                    loc = numpyro.deterministic("loc", jnp.cumsum(pre_loc))
+                    loc = numpyro.deterministic("loc", jnp.sort(pre_loc)) # TODO: was cumsum
                 else:
-                    idx = jnp.argsort(pre_loc, -1)  # , -1
-                    loc = numpyro.deterministic("loc", pre_loc[idx])
+                    #idx = jnp.argsort(pre_loc, -1)  # , -1
+                    #loc = numpyro.deterministic("loc", pre_loc[idx])
+                    loc = numpyro.deterministic("loc", jnp.sort(pre_loc, -1))
 
                 # scale = numpyro.sample('scale', dist.Gamma(1, 10))
                 scale = numpyro.sample('scale', dist.Uniform(0.1, std * 2.0))  # was 20.0
@@ -156,6 +171,9 @@ class DPMixture:
 
             elif self.obs_dist == "binomial":
                 probs_z = numpyro.deterministic("probs_z", probs[z])
+            elif self.obs_dist == "gamma":
+                shape_z = numpyro.deterministic("shape", shape[z])
+                rate_z = numpyro.deterministic("rate", rate[z])                
 
             # Construct the likelihood function
             if self.obs_dist == "normal":
@@ -173,7 +191,8 @@ class DPMixture:
             elif self.obs_dist == "truncated_normal":
                 sampled_y = numpyro.sample("y", dist.TruncatedNormal(low=self.truncated_normal_low,
                                                                      loc=loc_z, scale=scale_z), obs=y)
-
+            elif self.obs_dist == "gamma":
+                sampled_y = numpyro.sample("y", dist.Gamma(shape_z, rate_z), obs=y)
             else:
                 raise NotImplementedError
 
@@ -210,12 +229,12 @@ class DPMixture:
         return self.posterior_predictive(rng_key_, y=None)
 
 
-def surprisal_dp_plot_checks(model, samples, plot_max_groups=5, bins=30, filter_vals_higher=1e6):
+def surprisal_dp_plot_checks(model, samples, plot_max_groups=5, bins=30, filter_vals_higher=1e6, sharex=False, sharey=False):
     if (samples > filter_vals_higher).any():
         print(f"Warning, values higher than {filter_vals_higher}, filtering those out.")
 
     for k in range(model.G):
-        fig, ax = plt.subplots(ncols=4, figsize=(9, 2))
+        fig, ax = plt.subplots(ncols=4, sharex=sharex, sharey=sharey, figsize=(9, 2))
 
         # c = next(pal)
         c = "royalblue"
@@ -268,6 +287,10 @@ def plot_all_groups_preds_obs(self, prior=False, num_prior_samples=400, filter_v
 
     if (preds > filter_vals_higher).any():
         print(f"Warning, values higher than {filter_vals_higher}, filtering those out")
+    if (preds == -np.inf).any():
+        print(f"Warning, -inf values in predictions, filtering those out.")        
+    if (preds == np.inf).any():
+        print(f"Warning, +inf values in predictions, filtering those out.")        
 
     N_groups = len(self.group_names)
 
@@ -285,6 +308,10 @@ def plot_all_groups_preds_obs(self, prior=False, num_prior_samples=400, filter_v
         preds_g = np.array(preds_g).flatten()
         if (preds_g > filter_vals_higher).any():
             preds_g = preds_g[preds_g < filter_vals_higher]
+        if (preds_g == -np.inf).any():
+            preds_g = preds_g[preds_g != -np.inf]
+        if (preds_g == np.inf).any():
+            preds_g = preds_g[preds_g != np.inf]
 
         axs[row, col].hist(preds_g, bins=40, density=True, lw=0, label="preds", alpha=0.7,
                            color="blue")
@@ -300,14 +327,20 @@ def plot_all_groups_preds_obs(self, prior=False, num_prior_samples=400, filter_v
     plt.show()
 
 
-def plot_model_data_preds_obs(self, prior=False, num_prior_samples=400, filter_vals_higher=1e6):
+def plot_model_data_preds_obs(self, prior=False, num_prior_samples=400, filter_vals_higher=1e6, sharex=False, sharey=False):
     if prior:
         preds = self.draw_prior_predictions(num_samples=num_prior_samples)["y"]
     else:
-        preds = self.draw_posterior_predictions()["y"]
+        preds = self.draw_posterior_predictions()["y"]    
 
     if (preds > filter_vals_higher).any():
         print(f"Warning, values higher than {filter_vals_higher}, filtering those out.")
+        
+    if (preds == -np.inf).any():
+        print(f"Warning, -inf values in predictions, filtering those out.")
+        
+    if (preds == np.inf).any():
+        print(f"Warning, +inf values in predictions, filtering those out.")        
 
     ncols = 3
     nrows = 1
@@ -319,7 +352,7 @@ def plot_model_data_preds_obs(self, prior=False, num_prior_samples=400, filter_v
         "model obs": "lightblue"
     }
 
-    fig, axs = plt.subplots(ncols=ncols, nrows=nrows, figsize=(5 * ncols, 3 * nrows))
+    fig, axs = plt.subplots(ncols=ncols, nrows=nrows, sharex=sharex, sharey=sharey, figsize=(5 * ncols, 3 * nrows))
 
     data_group_id = self.group_names.index("data_group")
 
@@ -332,7 +365,13 @@ def plot_model_data_preds_obs(self, prior=False, num_prior_samples=400, filter_v
     preds_model_groups = np.array(preds_model_groups).flatten()
     if (preds_model_groups > filter_vals_higher).any():
         preds_model_groups = preds_model_groups[preds_model_groups < filter_vals_higher]
-
+        
+    if (preds_model_groups == -np.inf).any(): 
+        preds_model_groups = preds_model_groups[preds_model_groups != -np.inf]
+    
+    if (preds_model_groups == np.inf).any(): 
+        preds_model_groups = preds_model_groups[preds_model_groups != np.inf]
+        
     axs[0].hist(preds_model_groups, bins=40, density=True, lw=0, label="model preds",
                 color=c_dict["model preds"], alpha=0.7)
     axs[0].hist(np.array(obs_model_groups).flatten(), bins=40, density=True, lw=0, label="model obs",
@@ -341,6 +380,10 @@ def plot_model_data_preds_obs(self, prior=False, num_prior_samples=400, filter_v
     preds_data_group = np.array(preds_data_group).flatten()
     if (preds_data_group > filter_vals_higher).any():
         preds_data_group = preds_data_group[preds_data_group < filter_vals_higher]
+    if (preds_data_group == -np.inf).any():
+        preds_data_group = preds_data_group[preds_data_group != -np.inf]
+    if (preds_data_group == np.inf).any():
+        preds_data_group = preds_data_group[preds_data_group != np.inf]
 
     axs[0].hist(preds_data_group, bins=40, density=True, lw=0, label="data preds",
                 color=c_dict["data preds"], alpha=0.7)
