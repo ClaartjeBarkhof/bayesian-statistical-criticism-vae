@@ -726,7 +726,8 @@ def plot_surprisal_dists_against_global_stat(global_stats_df, surprisal_values, 
 
     # Sort
     df_sort_on = global_stats_df.sort_values(sort_on, ascending=sort_ascend)[sort_on]
-    sort_on_labels, sort_on_values = df_sort_on.index, df_sort_on.values
+
+    sort_on_labels, sort_on_values = df_sort_on.label.values, df_sort_on.values
     labels = [f"{l} | {sort_name}={v:.2f}" for l, v in zip(sort_on_labels, sort_on_values)]
 
     # Make colormap based on sort values
@@ -752,7 +753,7 @@ def plot_surprisal_dists_against_global_stat(global_stats_df, surprisal_values, 
             color = mapper.to_rgba(sort_on_values[idx])
 
             axs[row, col].hist(surprisal_values["data_group"][model_cols[col]], color="grey", **hist_kwargs,
-                               label="data group")
+                               label="Data group")
             axs[row, col].hist(surprisal_values[group_name][model_cols[col]], color=color, **hist_kwargs)
 
             if col == 0:
