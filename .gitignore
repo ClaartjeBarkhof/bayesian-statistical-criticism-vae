@@ -127,6 +127,7 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+<<<<<<< HEAD
 
 # Claartje added
 .idea/
@@ -167,4 +168,3 @@ generate_jobs.py
 !analysis/global_stats.csv
 !analysis/final_selection_runs.csv
 /analysis_run_postprocessing/run_postprocess_files/
-/WRITING

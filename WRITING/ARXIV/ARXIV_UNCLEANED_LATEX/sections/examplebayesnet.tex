@@ -1,0 +1,58 @@
+
+
+\begin{figure}[t]
+    \centering
+    %%%%% ARLM
+    \begin{tikzpicture}
+    % Define nodes
+    \node[obs]                (x1)     {$ x_1 $};
+    \node[obs, right=of x1]   (x2)     {$ x_2 $};
+    \node[obs, right=of x2]   (x3)     {$ x_3 $};
+    \node[obs, right=of x3]   (x4)     {$ x_4 $};
+    
+    % Connect nodes
+    \edge[]{x1}{x2};
+    \edge[]{x2}{x3};
+    \edge[bend left]{x1}{x3,x4};
+    \edge[bend right]{x2}{x4};
+    \edge{x3}{x4};
+    \end{tikzpicture}
+
+    %%%% DGLM
+    
+    \begin{tikzpicture}
+    % Define nodes
+    \node[obs, right]         (x1)     {$ x_1 $};
+    \node[obs, right=of x1]   (x2)     {$ x_2 $};
+    \node[obs, right=of x2]   (x3)     {$ x_3 $};
+    \node[obs, right=of x3]   (x4)     {$ x_4 $};
+    \node[latent, below=of x1] (z)      {$ z $};
+    
+    % Connect nodes
+    \edge[]{x1}{x2};
+    \edge[]{x2}{x3};
+    \edge[bend left]{x1}{x3,x4};
+    \edge[bend right]{x2}{x4};
+    \edge{x3}{x4};
+    \edge[]{z}{x1,x2,x3,x4};
+    \end{tikzpicture}
+    
+    
+    %%%% I-MAP
+    \begin{tikzpicture}
+    % Define nodes
+    \node[obs]                (x1)     {$ x_1 $};
+    \node[obs, right=of x1]   (x2)     {$ x_2 $};
+    \node[obs, right=of x2]   (x3)     {$ x_3 $};
+    \node[obs, right=of x3]   (x4)     {$ x_4 $};
+    
+    % Connect nodes
+    \edge[-]{x1}{x2};
+    \edge[-]{x2}{x3};
+    \edge[bend left,-]{x1}{x3,x4};
+    \edge[bend right,-]{x2}{x4};
+    \edge[-]{x3}{x4};
+    \end{tikzpicture}
+    
+    \caption{\label{fig:BN}Top: the BN structure $\mathcal A$ of an autoregressive language model unrolled for $4$ time steps. Middle: the BN structure $\mathcal G$ of a deep generative language model. Bottom: a graph $\mathcal M$ which is an I-map for both $P(X|\mathcal A)$ and $P(X|\mathcal G)$. Note that i) $\mathcal A$ is a complete graph and thus has no immoralities, ii) variable elimination for $z$ in $\mathcal G$ results in the exact same equivalence class as $\mathcal A$.} 
+\end{figure}

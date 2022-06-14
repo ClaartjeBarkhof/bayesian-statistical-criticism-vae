@@ -1,0 +1,134 @@
+% outline: we compare different models wrt their ability to generate samples that match statistical properties of control groups of samples (\eg, data samples or prior samples) through the less of tailor-made BDA models; the BDA model  is an opportunity for the analyst to focus on statistics that are practically relevant for the application; we design control groups that account for the four aspects of criticism, our methodology is based on Bayesian estimation (rather than null falsification) thus it enables ordering multiple models for compliance with control groups; this is particularly important given that effective estimation of VAEs remains an open problem with various designs aimed at overcoming failure models (eg,...); our methodology is complementary to intrinsic / information theoretic evaluation and overcomes some of its limitations, as we shall argue for in section A and demonstrate empirically in section B for two applications.
+
+\section{Introduction}\label{sec:intro}
+
+% > Statistical model criticism: what and why?
+Recent developments in 
+ % training-architecture-breakthroughs
+ deep learning and approximate probabilistic inference \citep{mnih2014neural,TitsiasL14,Kingma+2014:VAE} 
+have enabled the tractable estimation of flexible probabilistic models over complex sample spaces (\eg, images \citep{kingma2016improved}, natural language \citep{bowman2015generating}, molecules \citep{simonovsky2018graphvae}). 
+Deep or shallow, statistical models are seldom short of inadequacies \citep{theis2015note}. Before a model can be assumed suitable to purpose, it is crucial that we criticise it along dimensions of relevance to the practitioner. 
+Effective strategies for statistical model criticism \citep{box1980sampling} require a combination of statistics and knowledge of the application domain, but  methodology to assist in their design and automation does exist \citep{LloydEtAl2015}.  
+%Assessing statistical models and detecting their failure modes interact with designing and estimating interesting models, 
+This paper argues for the importance of statistical criticism in the context of deep probabilistic latent variable models (LVMs), in particular, one prominent class of deep LVMs---the variational auto-encoders \citep[VAEs;][]{Kingma+2014:VAE}---introducing  a methodology based on Bayesian estimation \citep{kruschke2013bayesian}. 
+
+\citet{LloydEtAl2015} formulate criticism of a deep probabilistic model as a pipeline: choose a statistic, compute it for a data sample, use the probabilistic model as a null hypothesis and estimate a p-value in an attempt to reject the model.
+One of the main innovations in their design is to use the model itself as a null hypothesis, an idea with roots in Bayesian model checking \citep{gelman1996posterior}.
+Their other innovation concerns the first step of this pipeline: instead of hand-picking a statistic, they chose a kernel and let maximum mean discrepancy \citep[MMD;][]{gretton2012kernel} find a statistic under which the two samples are maximally discrepant. Whether this \emph{witness function} is even relevant will depend on the practitioner's ability to choose a good kernel. % (itself a very hard problem, given lack of analytical tools to check the fit of the MMD procedure).
+Altogether their strategy constrains model criticism to a  binary decision (\ie, is this model good under MMD or not?). Moreover, with a tool to find discrepancies in a rather flexible space of statistics, null falsification will eventually reject most models, for most models are imperfect along some view of the data. For criticism, we need tools that help uncover trade-offs of different models, rather than reject them as unable to account for the data's full complexity. Besides, we need tools that allow the analyst to control the degree of scrutiny that guides model comparison.
+
+In this work, we derive a rich but low-dimensional statistic from the posterior predictive distribution of a latent structure model (\eg, a hierarchical Bayesian model such as a Bayesian mixture model or latent Dirichlet allocation \citep{blei2003lda}). This model is chosen by the practitioner depending on the specific view of the data they expect (or need) their VAEs to capture.
+We also turn away from binary decisions and null hypothesis testing, instead comparing the statistics of different groups under a Bayesian mixed-membership model that allows for the comparison of multiple groups (\ie, a control group and as many model groups as we have competing VAEs) and can answer complex queries regarding posterior discrepancy amongst groups. We motivate different dimensions of criticism relevant to the evaluation of VAEs and carefully design control groups that allow for comparing models along those dimensions.
+Finally, we demonstrate the application of this methodology in modelling the MNIST dataset \citep{deng2012mnist} and the sentences in the English Penn Treebank \citep{marcus1993ptb}.
+
+%\cbnote{In case we go with the term "latent structure model" we can perhaps drop that term in the intro as well in context of explicit characteristics a practitioner cares about} \\
+%\wanote{TODO: Improve this section (esp relevance of Lloyd and possibly other related work). Some notes from slack:}
+
+
+
+\section{Background}\label{sec:background}
+
+
+% \begin{table*}[t]
+%      \centering
+%      \small
+%      \begin{tabular}{l l p{4.45cm} l l p{4.45cm}} % I fixed 4.45 by hand and visual inspection, is there a more automatic way?
+%      \toprule 
+%      Distribution  & Type  & Design  & Distribution & Type & Design  \\ \midrule
+%         $p_Z$  &  prescribed & Fixed tractable choice (\eg, standard Gaussian). & $q_Z$ & implicit & Intractable marginal of $q_{ZX}$. \\
+        
+%         $p_{X|Z=z}$  & prescribed & Parametric tractable choice (\eg, factorised product of Bernoullis). \\
+        
+%         $p_X$ & implicit & Intractable marginal of $p_{XZ}$. & $q_X$ & unknown &  Data generating process for which a dataset of samples $\mathcal D$ is available. \\
+        
+%         $p_{Z|X=x}$ & implicit & Intractable posterior of $p_{XZ}$. & $q_{Z|X=x}$ & prescribed & Parametric tractable choice (\eg, factorised product of Gaussians). \\
+        
+%         \bottomrule
+%      \end{tabular}
+%      \caption{Ideally, a VAE reveals two views of the same probability space, one view (left) makes generation from the latent space easier, the other (right) makes representation of data samples easier. In practice, we parameterise the two views independently and estimate their parameters using an objective that connects the two (\eg, the evidence lowerbound). Practical limits of this approach, ranging from parametric bottlenecks to approximate optimisation to relaxation of objectives, may allow the two views to diverge from one another, each characterising a different probability measure.}
+%      \label{tab:two_views}
+%  \end{table*}
+
+
+%A generative model $p_X$ is a probability distribution associated with the random variable $X$. 
+Estimation of a generative model involves associating a distribution $p_X$ with a random variable $X$ that captures an unknown data generating process $q_X$ for which we have observations $\mathcal D_X = \{x^{(n)}\}_{n=1}^N$.\footnote{\textbf{Notation:} we use capital letters (\eg, $X$, $Z$) for random variables and lowercase letters (\eg, $x$, $z$) for their assignments. For a random variable $X$, we use $\Omega_X$ to denote its domain and $p_X$ to denote its distribution (with some abuse of notation, we also use $p_X$ to denote the probability density function, but this should be unambiguous in context). Sometimes we need to refer to two distributions for the same random variable, each characterised by a different density function, in those cases we will use $p_X$ and $q_X$.} 
+Commonly, we select from a parametric family the $p_X$ whose likelihood given observations is maximum. %\footnote{In deep learning we use stochastic optimisation \citep{robbins1951stochastic} and automatic differentiation \citep{BaydinEtAl2015AD} to attain a local optimum of the log-likelihood function, usually with the help of a regulariser and heldout data for model selection.} 
+Statistical criticism of $p_X$ then involves determining whether \enumone $p_X$ approximates statistical properties of future data. 
+In an LVM, $p_X$ is the marginal of a joint distribution $p_{XZ}$, where $Z$ is a latent variable. LVMs have various applications: a marginal  may be more expressive than simple parametric families available, % (\eg, mixture of Gaussians versus single Gaussian, hidden Markov models versus a Markov model, \etc), 
+which can lead to better fit of the data;
+%(\eg, \wrt variance and modes); 
+latent variables partition the probability space inducing clusters and/or other forms of potentially interpretable structure.
+%An LVM is a joint distribution $p_{XZ}$ over observations $x \in \mathcal X$ and their unobserved (or latent) representations $z \in \mathcal Z$. 
+In a directed LVM, we choose a prior distribution $p_Z$ for the latent variable, which establishes its statistical and geometrical properties, and a conditional model $p_{X|Z=z}$ of the observed variable---the \emph{observational model}. %\footnote{Typically, we choose a parametric family and let an algorithm such as gradient-based optimisation pick a member that approximately maximises model likelihood given observations.} 
+In addition to \enumone, criticising an LVM involves determining whether \enumtwo the model reveals unobserved factors of variation (\ie, hidden structure) that are useful to a practitioner.  
+Whereas \enumone concerns the fit of $p_X$ to the unknown data generating process, % that we access through a collection of data samples $x \sim \mathcal D$, 
+\enumtwo concerns the perceived usefulness of inferences based on the generative model's posterior distribution $p_{Z|X=x}$. Crucially, \enumtwo hinges on the observational model's ability to exploit the latent space to explain unobserved factors of variation of data samples.
+Posterior inference for $p_{XZ}$ is generally intractable, hence modern LVMs use auxiliary components for approximate inference, these introduce additional nuances to model criticism.
+%\cbnote{on "factors of variation": perhaps we can rephrase this in a way that stresses that this is not inherent to LVMs but needed for us as practitioners?}
+
+% (ii) can be a requirement for (i) where the observational the observation model is too simple (eg, gaussian)
+% TODO: a remark on notation.
+%\footnote{We may be tempted to think of the posterior $p_{Z|X=x}$ as the one responsible for exploiting the latent space, but the posterior is all but a consequence of our choice of observational model and prior, thus it is somewhat more productive to think of the posterior as a lens into the kinds of structure present in the joint distribution.}
+
+VAEs \citep{Kingma+2014:VAE,RezendeEtAl14VAE} are directed LVMs that employ neural networks (NNs) to parameterise the observational model $p_{X|Z=z}$. This flexible parameterisation precludes marginal inference and thus standard gradient-based parameter estimation. VAEs resort to variational inference \citep[VI;][]{Jordan+1999:VI}, and amortised VI \citep{Kingma+2014:VAE} in particular, to circumvent intractable posterior inference and enable tractable parameter estimation. %, where the intractable posterior is approximated by an independent model $q_{Z|X}(z|x)$. The 
+Amortised VI involves choosing a joint distribution $q_{ZX}$  determined by chaining an unknown data generating process $q_X$ %a choice of dataset $x \sim \mathcal D$ 
+and a conditional model $q_{Z|X=x}$ of the latent variable---the \emph{inference model}. Samples from the former are available through a dataset ($\mathcal D_X$), whereas the latter is a member of a tractable family parameterised by an NN and optimised along with the generative model $p_{XZ}$ to approximate that model's posterior distribution via minimisation of $\mathbb E_{x \sim \mathcal D_X}[\KL(q_{Z|X=x}||p_{Z|X=x})]$.
+As a function of the inference model, the Kullback-Leibler divergence $\KL(q_{Z|X=x}||p_{Z|X=x})$ is independent of the  marginal density $p_X(x)$, thus yielding a tractable objective for the estimation of $q_{Z|X=x}$. As a function of the observational model, this leads to a lowerbound $\mathbb E_{z\sim q_{Z|X=x}}[\log p_{X|Z=z}(x)] - \KL(q_{Z|X=x}||p_Z)$ on the model log-likelihood (the evidence lowerbound, ELBO), which we can use as a proxy for the estimation of $p_{X|Z=z}$.
+The inference model is a tool for tractable approximate inference, and in a VAE, it also enables estimation of $p_{XZ}$. %\footnote{This is in contrast with a variational Bayes approach to inference, where $p_{XZ}$ is kept fixed.}
+Thus, the qualitative properties of $p_{Z|X=x}$ is affected by trade-offs we make in the specification of $q_{Z|X=x}$ (\eg, factorisation assumptions), properties of the objective of optimisation (\eg, KL divergence is asymmetric and, in the direction we use, it is lenient to underestimation of posterior variance), as well as our ability to optimise non-convex objective functions (\eg, practical gradient-based optimisers offer at most local convergence).
+Even though $p_{XZ}$ and $q_{ZX}$ are meant to give two views of one probability space, these practical limitations lead the two spaces to diverge from one another. 
+A necessary condition for their consistency is that their marginals match \citep{Song2020Understanding}. %, that is, $p_X$ approximates statistical properties of $q_X$ and $q_Z$ approximates statistical properties of $p_Z$. 
+Thus, criticising a VAE further involves \enumthree assessing the extent to which %the marginal $q_Z$ approximates statistical properties of our choice of prior $p_Z$ and the extent to which we can recover $q_X$
+%the marginal $q_Z$ approximates statistical properties of our choice of prior $p_Z$ and whether chaining the inference and observational models recover $q_X$
+chaining its trainable components recovers $q_X$ and $p_Z$ in expectation.
+%\cbnote{I am not sure if "consistency of the two views" is the most precise wording to use here as consistency implies both q(z) = p(z) and q(x) = p(x) I think. We have covered the latter in our first goal  (i) already, so the focus of this point (iii) is more on the q(z) = p(z) part, right? q(x) is the implicit marginal we try to match with p(x) and p(z) an explicit marginal we try to match with q (z). So, maybe we can stress it is the consistency through the lens of q (which I think you also mean with to take as a focus in this part of the section). Perhaps we can say: consistency of the two views beyond only assessing q(x) = p(x), but also q(x) = p(x) or at least note that the latter is already taken care of as q(x) is implicit in the data set.}
+
+%In \rsec{intrinsic} we review intrinsic strategies commonly used for intrinsic criticism of VAEs, and present additional angles regarding their limitations, while in \rsec{approach} we use ideas from statistical model criticism to assess VAEs along the three criteria discussed here. % $q_Z$ to reproduce statistical properties of the prior $p_Z$ and the ability to reproduce statistics of the data by chaining the observational and inference models. % components as well as of pipelines through both inference and observational model propose a strategy to overcome those limitations.
+
+% \wanote{Is this a place to talk about evaluation of VAEs and also to discuss the failure modes of VAEs?}
+
+% WA: Hm, I think this is already a contribution
+
+% \wanote{The rest is still a mine field :p}
+
+% We propose to
+% 1. assess p(X, Z) by statistical evaluation of pX, that is, assess marginal samples against D_X (a proxy for q(X));
+%  because this sheds light on the fit of p(X,Z) to data
+
+% 2. assess q(Z, X) by statistical evaluation of qZ, that is, assess marginal samples against D_Z (a proxy for p(Z));
+%  because this sheds light on the compatibility of q(Z,X) with p(X,Z);
+
+% 3. assess properties of the map Z<->X through a pipeline that starts with a data sample x ~ D_X and ends with a model sample x' ~ p(X|Z=z) for z ~ q(Z|X=x).
+%  because this ...
+% 3a. we assess x' marginally against D_X
+%  because this...
+% 3b. we assess x' conditionally given x
+%  because this...
+
+% For (1) and (2) we use the surprisal of model samples (e.g., x~p or z~q) against a control group (e.g., data samples or prior samples) Bayesian analysis models, for (3) we use surprisal of (x'|x~pq) against (3a) x~D (3b) we use surprisal (given y) of (x'|x~pq) against x~D which the BDA model "labels" as y.
+
+% (1) compare p_X to q_X:
+%  E_{z~p_Z}[x~p_X|Z=z] vs x~D
+% (2) compare q_Z to p_Z:
+%  E_{x~D}[z~q_Z|X=x] vs z~p_Z
+
+% While $p_X$ and $q_Z$ are characterised by intractable densities, simulation is perfectly viable by virtue of the factorisation of the two views. On the other hand, $p_{Z|X=x}$ and $q_{X|Z=z}$ are unavailable, except through their respective approximations (\ie, the inference model and the observational model) which we prescribe directly.
+
+% We propose a view of ...
+% Statistical criticism of $q_{ZX}$ mirrors that of $p_{XZ}$, namely, it involves assessing \enumthree  statistical properties of $q_Z$ and \enumfour qualitative properties of $q_{X|Z=z}$. Because $p_{XZ}$ and $q_{ZX}$ should correspond to two parameterisations of the same probability space, we can re-express these as determining whether
+%  \enumthree $q_Z$ approximates statistical  properties of the prior %$\mathbb E_{x \sim \mathcal D}[p_{Z|X=x}]$
+%  and \enumfour $q_{X|Z=z}$ approximates statistical properties of the observational model.
+% Note the parallel between \enumone and \enumthree, both concern an intractable marginal of their respective joint distributions, both aimed at matching statistical properties of a fixed process (namely, the data generating process in one case, the prior in the other). 
+% Similarly, there is a parallel between \enumtwo and \enumfour, both concern an intractable conditional of their respective joint distributions, both shed light into the kinds of structure encoded in the joint distribution. 
+
+
+% We develop tools for statistical criticism of VAEs ... 
+
+% Drawing a parallel to criticism for the generative model, statistical model criticism of the inference model involves determining whether it
+%  \enumone \wanote{this is about evaluating $q_Z$}
+%  %approximates statistical properties of unobserved data, % this is about q(z)
+%  and \enumtwo  \wanote{this is about evaluating $q_{X|Z=z}$}.
+%  %something about q(x|z)
+ 
+
+%General applications of LVMs include data imputation, manifold learning,  and semi-supervised learning, with specific applications to computer vision, natural language processing, speech recognition, molecular chemistry, and many more.
