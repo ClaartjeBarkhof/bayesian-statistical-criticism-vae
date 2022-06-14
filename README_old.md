@@ -1,6 +1,12 @@
-# File structure
+# Statistical Model Criticism of Variational Auto-Encoders (Barkhof & Aziz, 2022) 
 
-# `/analysis`
+_In this repository I store the code base of my research work conducted at ILLC UvA fall 2021 to spring 2022 in collaboration with Wilker Aziz._
+
+🔗 [Link to pre-print paper on Arxiv](https://arxiv.org/abs/2204.03030) </br>
+
+## A note on the analysis code structure
+
+`/analysis`
   - `/bda_models`
     - `bda_dp_mixture_surprisal_vals.py`: 
         analyse surprisal values with DP Mixture (NumPyro model + plot functions)
