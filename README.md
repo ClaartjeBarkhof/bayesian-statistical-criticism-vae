@@ -8,7 +8,7 @@ In this repository I store the code base of my research work conducted at ILLC U
 
 ### A note on the analysis code structure
 
-# `/analysis`
+`/analysis`
   - `/bda_models`
     - `bda_dp_mixture_surprisal_vals.py`: 
         analyse surprisal values with DP Mixture (NumPyro model + plot functions)
