@@ -1,7 +1,6 @@
 # Statistical Model Criticism of Variational Auto-Encoders (Barkhof & Aziz, 2022) 
 
-_In this repository I store the code base of my research work conducted at ILLC UvA fall 2021 to spring 2022 in collaboration with Wilker Aziz.
-_
+_In this repository I store the code base of my research work conducted at ILLC UvA fall 2021 to spring 2022 in collaboration with Wilker Aziz._
 
 🔗 [Link to pre-print paper on Arxiv](https://arxiv.org/abs/2204.03030) </br>
 
